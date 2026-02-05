@@ -6,7 +6,7 @@ import Inventory from './components/Inventory';
 import Sales from './components/Sales';
 import Reports from './components/Reports';
 import Login from './components/Login';
-import Settings from './components/Settings'; // 1. Pastikan lo buat file ini ya Bre!
+import Settings from './components/Settings';
 import { supabase } from './utils/supabase';
 import { LayoutDashboard, Wallet, Package, ShoppingCart, BarChart3, Menu, X, Cloud, LogOut, CloudCheck, Settings as SettingsIcon } from 'lucide-react';
 
@@ -16,11 +16,8 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  
-  // 2. State untuk Nama UMKM Dinamis
   const [businessName, setBusinessName] = useState('UMKM PRO');
 
-  // Mappers to bridge Application (camelCase) and Database (snake_case)
   const mapBatchFromDB = (b: any): StockBatch => ({
     id: b.id,
     date: b.date,
@@ -66,8 +63,7 @@ const App: React.FC = () => {
   const fetchAllData = async () => {
     setIsLoading(true);
     try {
-      // 3. Tarik Nama Bisnis dari Supabase
-      const { data: profileData } = await supabase.from('profile').select('business_name').single();
+      const { data: profileData } = await supabase.from('profile').select('business_name').maybeSingle();
       if (profileData) setBusinessName(profileData.business_name);
 
       const [transRes, batchRes, saleRes, prodRes] = await Promise.all([
@@ -117,7 +113,6 @@ const App: React.FC = () => {
       category: t.category,
       type: t.type
     };
-
     if (t.relatedSaleId) dbData.related_sale_id = t.relatedSaleId;
     if (t.relatedStockBatchId) dbData.related_stock_batch_id = t.relatedStockBatchId;
 
@@ -129,12 +124,10 @@ const App: React.FC = () => {
   const deleteTransaction = useCallback(async (id: string) => {
     const trans = state.transactions.find(t => t.id === id);
     if (!trans) return;
-
     if (trans.relatedSaleId || trans.relatedStockBatchId) {
-      alert("Transaksi ini terhubung dengan Penjualan atau Stok. Silakan hapus data di menu Penjualan atau Stok Barang untuk membatalkan.");
+      alert("Transaksi ini terhubung dengan Penjualan atau Stok. Silakan hapus data di menu Penjualan atau Stok Barang.");
       return;
     }
-
     const { error } = await supabase.from('transactions').delete().eq('id', id);
     if (error) { alert(error.message); return; }
     setState(prev => ({ ...prev, transactions: prev.transactions.filter(t => t.id !== id) }));
@@ -143,22 +136,48 @@ const App: React.FC = () => {
   const addBatch = useCallback(async (b: Omit<StockBatch, 'id' | 'currentQty' | 'totalCost'>) => {
     const totalCost = b.initialQty * b.buyPrice;
     const dbBatch = {
-      date: b.date,
-      product_name: b.productName,
-      initial_qty: b.initialQty,
-      current_qty: b.initialQty,
-      buy_price: b.buyPrice,
-      total_cost: totalCost,
-      stock_type: b.stockType
+      date: b.date, product_name: b.productName, initial_qty: b.initialQty,
+      current_qty: b.initialQty, buy_price: b.buyPrice, total_cost: totalCost, stock_type: b.stockType
     };
 
     const { data: batchData, error: batchError } = await supabase.from('batches').insert([dbBatch]).select();
     if (batchError) { alert(batchError.message); return; }
 
     const dbTrans = {
-      date: b.date,
-      amount: totalCost,
-      description: `Beli Stok: ${b.productName} (${b.initialQty} unit)`,
-      category: TransactionCategory.BELI_STOK,
-      type: TransactionType.OUT,
-      related_stock_batch_id
+      date: b.date, amount: totalCost, description: `Beli Stok: ${b.productName}`,
+      category: TransactionCategory.BELI_STOK, type: TransactionType.OUT, related_stock_batch_id: batchData[0].id
+    };
+
+    const { data: transData } = await supabase.from('transactions').insert([dbTrans]).select();
+    setState(prev => ({
+      ...prev,
+      batches: [...prev.batches, mapBatchFromDB(batchData[0])],
+      transactions: [mapTransactionFromDB(transData![0]), ...prev.transactions]
+    }));
+  }, []);
+
+  const deleteBatch = useCallback(async (id: string) => {
+    const batch = state.batches.find(b => b.id === id);
+    if (!batch || batch.currentQty < batch.initialQty) {
+      alert("Stok sudah terpakai, tidak bisa dihapus.");
+      return;
+    }
+    await supabase.from('transactions').delete().eq('related_stock_batch_id', id);
+    await supabase.from('batches').delete().eq('id', id);
+    fetchAllData();
+  }, [state.batches]);
+
+  const addProductionUsage = useCallback(async (u: { date: string, productName: string, qty: number }) => {
+    let remaining = u.qty;
+    let totalUsageCost = 0;
+    const usages: SaleItemUsage[] = [];
+    const productBatches = [...state.batches]
+      .filter(b => b.productName === u.productName && b.currentQty > 0)
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    if (productBatches.reduce((s, b) => s + b.currentQty, 0) < u.qty) {
+      alert("Stok tidak cukup."); return;
+    }
+
+    for (const batch of productBatches) {
+      if (remaining <= 0)
