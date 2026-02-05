@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { AppState, Transaction, TransactionType, TransactionCategory, StockBatch, Sale } from './types';
+import React, { useState, useEffect, useCallback } from 'react';
+import { AppState, Transaction, TransactionType, TransactionCategory, StockBatch, Sale, SaleItemUsage, ProductionUsage } from './types';
 import Dashboard from './components/Dashboard';
 import CashBook from './components/CashBook';
 import Inventory from './components/Inventory';
@@ -8,7 +8,7 @@ import Reports from './components/Reports';
 import Login from './components/Login';
 import Settings from './components/Settings';
 import { supabase } from './utils/supabase';
-import { LayoutDashboard, Wallet, Package, ShoppingCart, BarChart3, Menu, Cloud, LogOut, Settings as SettingsIcon } from 'lucide-react';
+import { LayoutDashboard, Wallet, Package, ShoppingCart, BarChart3, Menu, X, Cloud, LogOut, Settings as SettingsIcon, CloudCheck } from 'lucide-react';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -18,7 +18,6 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [businessName, setBusinessName] = useState('UMKM PRO');
 
-  // --- Mappers & Fetcher ---
   const mapBatch = (b: any): StockBatch => ({ id: b.id, date: b.date, productName: b.product_name, initialQty: b.initial_qty, currentQty: b.current_qty, buyPrice: Number(b.buy_price), totalCost: Number(b.total_cost), stockType: b.stock_type });
   const mapTrans = (t: any): Transaction => ({ id: t.id, date: t.date, amount: Number(t.amount), description: t.description, category: t.category, type: t.type, relatedSaleId: t.related_sale_id, relatedStockBatchId: t.related_stock_batch_id });
   const mapSale = (s: any): Sale => ({ id: s.id, date: s.date, productName: s.product_name, qty: s.qty, sellPrice: Number(s.sell_price), totalRevenue: Number(s.total_revenue), totalCOGS: Number(s.total_cogs), batchUsages: s.batch_usages });
@@ -49,7 +48,6 @@ const App: React.FC = () => {
     return () => subscription.unsubscribe();
   }, []);
 
-  // --- Handlers ---
   const addBatch = async (b: any) => {
     const cost = b.initialQty * b.buyPrice;
     const { data: bD } = await supabase.from('batches').insert([{ date: b.date, product_name: b.productName, initial_qty: b.initialQty, current_qty: b.initialQty, buy_price: b.buyPrice, total_cost: cost, stock_type: b.stockType }]).select();
@@ -67,7 +65,7 @@ const App: React.FC = () => {
     fetchData();
   };
 
-  if (isLoading) return <div className="min-h-screen flex items-center justify-center font-bold text-indigo-600">Menghubungkan ke Cloud...</div>;
+  if (isLoading) return <div className="min-h-screen flex items-center justify-center font-bold">Menghubungkan ke Cloud...</div>;
   if (!session) return <Login onLoginSuccess={() => {}} />;
 
   const tabs = [
@@ -80,16 +78,55 @@ const App: React.FC = () => {
   ];
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 font-sans">
+    <div className="min-h-screen flex flex-col md:flex-row bg-slate-50">
       <aside className={`fixed inset-y-0 left-0 z-40 w-64 bg-slate-900 transform transition-transform md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="p-6 text-white font-black italic flex items-center gap-2 border-b border-slate-800 tracking-tighter">
-          <Cloud className="text-indigo-400" /> {businessName}
-        </div>
-        <nav className="p-4 space-y-1">
+        <div className="p-6 text-white font-black italic flex items-center gap-2"><Cloud className="text-indigo-500" /> {businessName}</div>
+        <nav className="p-4 space-y-2">
           {tabs.map(tab => (
-            <button key={tab.id} onClick={() => { setActiveTab(tab.id); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm transition-all ${activeTab === tab.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
-              <tab.icon size={18} /> {tab.label}
+            <button key={tab.id} onClick={() => { setActiveTab(tab.id); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm transition ${activeTab === tab.id ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-800'}`}>
+              <tab.icon size={20} /> {tab.label}
             </button>
           ))}
         </nav>
-        <button onClick={() => supabase.auth.signOut()} className="absolute bottom-6 left-6 text-slate-500 hover:text-red-
+        <button onClick={() => supabase.auth.signOut()} className="absolute bottom-6 left-6 text-slate-500 hover:text-red-400 flex items-center gap-2 text-xs font-bold"><LogOut size={14} /> Keluar</button>
+      </aside>
+
+      <main className="flex-1 p-4 md:p-8 overflow-auto">
+        <div className="max-w-7xl mx-auto">
+          {activeTab === 'dashboard' && <Dashboard state={state} />}
+          {activeTab === 'cash' && (
+            <CashBook 
+              transactions={state.transactions} 
+              onAdd={(t:any) => supabase.from('transactions').insert([t]).then(() => fetchData())} 
+              onAddBatch={addBatch} 
+              onDelete={(id) => window.confirm("Hapus transaksi ini, Bre?") && supabase.from('transactions').delete().eq('id', id).then(() => fetchData())} 
+            />
+          )}
+          {activeTab === 'inventory' && (
+            <Inventory 
+              batches={state.batches} 
+              productionUsages={state.productionUsages} 
+              onAddBatch={addBatch} 
+              onDeleteBatch={(id) => window.confirm("Hapus data stok ini?") && supabase.from('batches').delete().eq('id', id).then(() => fetchData())} 
+              onUseProductionStock={() => {}} 
+              onDeleteProductionUsage={() => {}} 
+            />
+          )}
+          {activeTab === 'sales' && (
+            <Sales 
+              sales={state.sales} 
+              batches={state.batches} 
+              onAddSale={addSale} 
+              onDeleteSale={(id) => window.confirm("Hapus penjualan? Stok otomatis kembali.") && supabase.from('sales').delete().eq('id', id).then(() => fetchData())} 
+            />
+          )}
+          {activeTab === 'reports' && <Reports state={state} businessName={businessName} />}
+          {activeTab === 'settings' && <Settings userId={session.user.id} onNameUpdated={(n) => setBusinessName(n)} />}
+        </div>
+      </main>
+      <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="md:hidden fixed bottom-4 right-4 p-4 bg-indigo-600 text-white rounded-full shadow-lg z-50"><Menu size={24} /></button>
+    </div>
+  );
+};
+
+export default App;
