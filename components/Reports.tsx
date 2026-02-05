@@ -1,172 +1,95 @@
 import React, { useState, useMemo } from 'react';
 import { AppState, TransactionCategory, TransactionType } from '../types';
 import { formatCurrency, formatDate } from '../utils/format';
-import { FileDown, Calendar, ArrowRight, Calculator, Info, TrendingUp, WalletMinimal, CalendarDays } from 'lucide-react';
+import { FileDown, ArrowRight, Calculator, TrendingUp, CalendarDays, Percent } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
-// 1. Tambahkan businessName di Interface Props
-interface Props {
-  state: AppState;
-  businessName: string; 
-}
+interface Props { state: AppState; businessName: string; }
 
 const Reports: React.FC<Props> = ({ state, businessName }) => {
-  // Default range: Start of month to Today
-  const [startDate, setStartDate] = useState(() => {
-    const d = new Date();
-    d.setDate(1); 
-    return d.toISOString().split('T')[0];
-  });
+  const [startDate, setStartDate] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().split('T')[0]; });
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
 
-  const reportData = useMemo(() => {
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999);
+  const data = useMemo(() => {
+    const s = new Date(startDate); const e = new Date(endDate); e.setHours(23, 59, 59, 999);
+    const trans = state.transactions.filter(t => { const d = new Date(t.date); return d >= s && d <= e; });
+    const sales = state.sales.filter(sl => { const d = new Date(sl.date); return d >= s && d <= e; });
+    const prod = state.productionUsages.filter(u => { const d = new Date(u.date); return d >= s && d <= e; });
 
-    const transactionsInPeriod = state.transactions.filter(t => {
-      const d = new Date(t.date);
-      return d >= start && d <= end;
-    });
+    const rev = trans.filter(t => t.category === TransactionCategory.PENJUALAN && t.type === TransactionType.IN).reduce((a, b) => a + b.amount, 0);
+    const hpp = sales.reduce((a, b) => a + b.totalCOGS, 0);
+    const cashExp = trans.filter(t => t.category === TransactionCategory.BIAYA).reduce((a, b) => a + b.amount, 0);
+    const matExp = prod.reduce((a, b) => a + b.totalCost, 0);
+    const laba = rev - hpp - (cashExp + matExp);
+    const cIn = trans.filter(t => t.type === TransactionType.IN).reduce((a, b) => a + b.amount, 0);
+    const cOut = trans.filter(t => t.type === TransactionType.OUT).reduce((a, b) => a + b.amount, 0);
 
-    const salesInPeriod = state.sales.filter(s => {
-      const d = new Date(s.date);
-      return d >= start && d <= end;
-    });
-
-    const productionUsageInPeriod = state.productionUsages.filter(u => {
-      const d = new Date(u.date);
-      return d >= start && d <= end;
-    });
-
-    const totalRevenue = transactionsInPeriod
-      .filter(t => t.category === TransactionCategory.PENJUALAN && t.type === TransactionType.IN)
-      .reduce((sum, t) => sum + t.amount, 0);
-    
-    const totalHPP = salesInPeriod.reduce((sum, s) => sum + s.totalCOGS, 0);
-    
-    const totalCashExpenses = transactionsInPeriod
-      .filter(t => t.category === TransactionCategory.BIAYA)
-      .reduce((sum, t) => sum + t.amount, 0);
-    
-    const totalMaterialUsageCost = productionUsageInPeriod.reduce((sum, u) => sum + u.totalCost, 0);
-    const totalExpenses = totalCashExpenses + totalMaterialUsageCost;
-    const labaBersih = totalRevenue - totalHPP - totalExpenses;
-
-    const cashIn = transactionsInPeriod.filter(t => t.type === TransactionType.IN).reduce((sum, t) => sum + t.amount, 0);
-    const cashOut = transactionsInPeriod.filter(t => t.type === TransactionType.OUT).reduce((sum, t) => sum + t.amount, 0);
-    
-    const totalModal = transactionsInPeriod
-      .filter(t => t.category === TransactionCategory.MODAL)
-      .reduce((sum, t) => sum + t.amount, 0);
-      
-    const totalStockBuy = transactionsInPeriod
-      .filter(t => t.category === TransactionCategory.BELI_STOK)
-      .reduce((sum, t) => sum + t.amount, 0);
-
-    return { 
-      totalRevenue, totalHPP, totalExpenses, totalMaterialUsageCost,
-      totalCashExpenses, labaBersih, cashIn, cashOut, totalModal, totalStockBuy
-    };
+    return { rev, hpp, exp: cashExp + matExp, laba, cIn, cOut };
   }, [state, startDate, endDate]);
 
-  const exportToExcel = () => {
-    // 2. Gunakan businessName di dalam isi Excel
-    const ws_data = [
-      [`LAPORAN KEUANGAN ${businessName.toUpperCase()}`],
-      ["Periode Laporan:", `${formatDate(startDate)} s/d ${formatDate(endDate)}`],
-      ["Tanggal Cetak:", new Date().toLocaleString('id-ID')],
+  const exportExcel = () => {
+    const rows = [
+      [`LAPORAN KEUANGAN: ${businessName.toUpperCase()}`],
+      [`Periode: ${startDate} s/d ${endDate}`],
       [],
-      ["I. LAPORAN LABA RUGI (PROFIT & LOSS)"],
-      ["A. PENDAPATAN"],
-      ["   (+) Total Uang Masuk Penjualan", reportData.totalRevenue],
-      ["B. BEBAN POKOK"],
-      ["   (-) Total HPP (Metode FIFO)", reportData.totalHPP],
-      ["C. BIAYA OPERASIONAL & PRODUKSI"],
-      ["   (-) Total Biaya Kas Operasional", reportData.totalCashExpenses],
-      ["   (-) Total Nilai Pemakaian Bahan Baku", reportData.totalMaterialUsageCost],
-      ["D. HASIL AKHIR"],
-      ["   (=) LABA BERSIH (UNTUNG/RUGI)", reportData.labaBersih],
+      ["KETERANGAN", "NOMINAL"],
+      ["Total Penjualan", data.rev],
+      ["Total HPP", data.hpp],
+      ["Total Biaya Operasional", data.exp],
+      ["LABA BERSIH", data.laba],
       [],
-      ["II. RINGKASAN ARUS KAS (CASH FLOW)"],
-      ["   Total Seluruh Kas Masuk", reportData.cashIn],
-      ["   Total Seluruh Kas Keluar", reportData.cashOut],
-      ["   Saldo Kas Bersih Periode Ini", reportData.cashIn - reportData.cashOut],
-      [],
-      ["III. INFORMASI MODAL & ASET"],
-      ["   Total Injeksi Modal", reportData.totalModal],
-      ["   Total Pembelian Stok Barang (Aset)", reportData.totalStockBuy],
-      [],
-      ["IV. RINCIAN TRANSAKSI KAS (MASUK & KELUAR)"],
-      ["Tanggal", "Keterangan", "Kategori", "Tipe", "Nominal (IDR)"]
+      ["RINGKASAN KAS"],
+      ["Total Kas Masuk", data.cIn],
+      ["Total Kas Keluar", data.cOut],
+      ["Saldo Bersih", data.cIn - data.cOut]
     ];
-
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999);
-
-    state.transactions
-      .filter(t => {
-        const d = new Date(t.date);
-        return d >= start && d <= end;
-      })
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-      .forEach(t => {
-        ws_data.push([formatDate(t.date), t.description, t.category, t.type, t.amount]);
-      });
-
-    ws_data.push([], ["V. RINCIAN PEMAKAIAN BAHAN BAKU (NON-KAS)"], ["Tanggal", "Nama Bahan", "Jumlah", "Nilai Biaya (IDR)"]);
-    
-    state.productionUsages
-      .filter(u => {
-        const d = new Date(u.date);
-        return d >= start && d <= end;
-      })
-      .forEach(u => {
-        ws_data.push([formatDate(u.date), u.productName, u.qty, u.totalCost]);
-      });
-
+    const ws = XLSX.utils.aoa_to_sheet(rows);
     const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(ws_data);
-    
-    const wscols = [{wch: 15}, {wch: 40}, {wch: 20}, {wch: 10}, {wch: 20}];
-    ws['!cols'] = wscols;
-
-    XLSX.utils.book_append_sheet(wb, ws, "Laporan Keuangan");
-    
-    // 3. Nama File Excel sekarang Dinamis: Laporan_NamaUMKM_Tanggal.xlsx
-    const cleanName = businessName.replace(/[^a-z0-9]/gi, '_').toUpperCase();
-    XLSX.writeFile(wb, `Laporan_${cleanName}_${startDate}_ke_${endDate}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, "Laporan");
+    XLSX.writeFile(wb, `Laporan_${businessName}_${startDate}.xlsx`);
   };
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-1">
-            <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-              <CalendarDays size={16} /> Pilih Rentang Waktu
-            </h3>
-            <div className="flex flex-wrap items-center gap-3 mt-2">
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-2 flex items-center gap-2">
-                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="bg-transparent text-sm font-bold outline-none text-slate-700" />
-              </div>
-              <ArrowRight size={16} className="text-slate-300" />
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-2 flex items-center gap-2">
-                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-transparent text-sm font-bold outline-none text-slate-700" />
-              </div>
-            </div>
-          </div>
-          <button 
-            onClick={exportToExcel} 
-            className="flex items-center justify-center gap-2 bg-indigo-600 text-white px-8 py-3 rounded-xl hover:bg-indigo-700 transition font-bold shadow-lg shadow-indigo-100 whitespace-nowrap"
-          >
-            <FileDown size={18} /> Ekspor Excel (.xlsx)
-          </button>
+    <div className="space-y-6 animate-in fade-in duration-500">
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="bg-slate-50 p-2 rounded-xl text-sm font-bold border-none outline-none" />
+          <ArrowRight size={16} className="text-slate-300" />
+          <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-slate-50 p-2 rounded-xl text-sm font-bold border-none outline-none" />
         </div>
+        <button onClick={exportExcel} className="bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-indigo-700 transition shadow-lg shadow-indigo-100">
+          <FileDown size={18} /> Ekspor Excel
+        </button>
       </div>
 
-      {/* Tampilan Laba Rugi Dll tetap sama seperti sebelumnya */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-2
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <Card title="PENJUALAN" val={data.rev} icon={<TrendingUp />} color="text-emerald-600" bg="bg-emerald-50" />
+        <Card title="HPP & BIAYA" val={data.hpp + data.exp} icon={<Calculator />} color="text-red-600" bg="bg-red-50" />
+        <Card title="LABA BERSIH" val={data.laba} icon={<Percent />} color="text-indigo-600" bg="bg-indigo-50" border="border-2 border-indigo-100" />
+      </div>
+
+      <div className="bg-slate-900 p-6 rounded-2xl text-white">
+        <h4 className="font-bold mb-4 flex items-center gap-2 italic">RINGKASAN ARUS KAS</h4>
+        <div className="space-y-3 text-sm">
+          <div className="flex justify-between border-b border-slate-800 pb-2"><span>Total Kas Masuk</span><span className="text-emerald-400 font-bold">{formatCurrency(data.cIn)}</span></div>
+          <div className="flex justify-between border-b border-slate-800 pb-2"><span>Total Kas Keluar</span><span className="text-red-400 font-bold">{formatCurrency(data.cOut)}</span></div>
+          <div className="flex justify-between pt-2 text-base font-black"><span>SALDO AKHIR</span><span className="text-indigo-400">{formatCurrency(data.cIn - data.cOut)}</span></div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const Card = ({ title, val, icon, color, bg, border = "border border-slate-200" }: any) => (
+  <div className={`p-6 rounded-2xl shadow-sm ${bg} ${border}`}>
+    <div className="flex items-center gap-4">
+      <div className={`p-3 rounded-xl bg-white ${color}`}>{icon}</div>
+      <div>
+        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{title}</p>
+        <p className={`text-xl font-black ${color}`}>{formatCurrency(val)}</p>
+      </div>
+    </div>
+  </div>
+);
+
+export default Reports;
