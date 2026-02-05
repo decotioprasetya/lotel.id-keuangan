@@ -8,7 +8,7 @@ import Reports from './components/Reports';
 import Login from './components/Login';
 import Settings from './components/Settings';
 import { supabase } from './utils/supabase';
-import { LayoutDashboard, Wallet, Package, ShoppingCart, BarChart3, Menu, LogOut, Settings as SettingsIcon, Cloud } from 'lucide-react';
+import { LayoutDashboard, Wallet, Package, ShoppingCart, BarChart3, Menu, X, Cloud, LogOut, Settings as SettingsIcon, CloudCheck } from 'lucide-react';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -24,16 +24,24 @@ const App: React.FC = () => {
 
   const fetchData = async () => {
     setIsLoading(true);
-    const { data: prof } = await supabase.from('profile').select('business_name').maybeSingle();
-    if (prof) setBusinessName(prof.business_name);
-    const [t, b, s, p] = await Promise.all([
-      supabase.from('transactions').select('*').order('date', { ascending: false }),
-      supabase.from('batches').select('*').order('date', { ascending: true }),
-      supabase.from('sales').select('*').order('date', { ascending: false }),
-      supabase.from('production_usages').select('*').order('date', { ascending: false })
-    ]);
-    setState({ transactions: (t.data || []).map(mapTrans), batches: (b.data || []).map(mapBatch), sales: (s.data || []).map(mapSale), productionUsages: p.data || [] });
-    setIsLoading(false);
+    try {
+      const { data: prof } = await supabase.from('profile').select('business_name').maybeSingle();
+      if (prof) setBusinessName(prof.business_name);
+      
+      const [t, b, s, p] = await Promise.all([
+        supabase.from('transactions').select('*').order('date', { ascending: false }),
+        supabase.from('batches').select('*').order('date', { ascending: true }),
+        supabase.from('sales').select('*').order('date', { ascending: false }),
+        supabase.from('production_usages').select('*').order('date', { ascending: false })
+      ]);
+
+      setState({
+        transactions: (t.data || []).map(mapTrans),
+        batches: (b.data || []).map(mapBatch),
+        sales: (s.data || []).map(mapSale),
+        productionUsages: (p.data || []).map((u: any) => ({ ...u, totalCost: Number(u.total_cost) }))
+      });
+    } catch (e) { console.error(e); } finally { setIsLoading(false); }
   };
 
   useEffect(() => {
@@ -45,54 +53,57 @@ const App: React.FC = () => {
   const addBatch = async (b: any) => {
     const cost = b.initialQty * b.buyPrice;
     const { data: bD } = await supabase.from('batches').insert([{ date: b.date, product_name: b.productName, initial_qty: b.initialQty, current_qty: b.initialQty, buy_price: b.buyPrice, total_cost: cost, stock_type: b.stockType }]).select();
-    await supabase.from('transactions').insert([{ date: b.date, amount: cost, description: `Beli: ${b.productName}`, category: TransactionCategory.BELI_STOK, type: TransactionType.OUT, related_stock_batch_id: bD![0].id }]);
+    if (bD) await supabase.from('transactions').insert([{ date: b.date, amount: cost, description: `Beli: ${b.productName}`, category: TransactionCategory.BELI_STOK, type: TransactionType.OUT, related_stock_batch_id: bD[0].id }]);
     fetchData();
   };
 
   const addSale = async (s: any) => {
     let rem = s.qty; let cogs = 0; const usg: any[] = [];
     const pB = [...state.batches].filter(b => b.productName === s.productName && b.currentQty > 0).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    for (const b of pB) { if (rem <= 0) break; const t = Math.min(b.currentQty, rem); rem -= t; cogs += t * b.buyPrice; usg.push({ batchId: b.id, qtyUsed: t, costPerUnit: b.buyPrice }); await supabase.from('batches').update({ current_qty: b.currentQty - t }).eq('id', b.id); }
-    const rev = s.qty * s.sellPrice;
-    const { data: sD } = await supabase.from('sales').insert([{ date: s.date, product_name: s.productName, qty: s.qty, sell_price: s.sellPrice, total_revenue: rev, total_cogs: cogs, batch_usages: usg }]).select();
-    await supabase.from('transactions').insert([{ date: s.date, amount: rev, description: `Jual: ${s.productName}`, category: TransactionCategory.PENJUALAN, type: TransactionType.IN, related_sale_id: sD![0].id }]);
+    if (pB.reduce((sum, b) => sum + b.currentQty, 0) < s.qty) return alert("Stok kurang!");
+    for (const b of pB) { if (rem <= 0) break; const take = Math.min(b.currentQty, rem); rem -= take; cogs += take * b.buyPrice; usg.push({ batchId: b.id, qtyUsed: take, costPerUnit: b.buyPrice }); await supabase.from('batches').update({ current_qty: b.currentQty - take }).eq('id', b.id); }
+    const { data: sD } = await supabase.from('sales').insert([{ date: s.date, product_name: s.productName, qty: s.qty, sell_price: s.sellPrice, total_revenue: s.qty * s.sellPrice, total_cogs: cogs, batch_usages: usg }]).select();
+    if (sD) await supabase.from('transactions').insert([{ date: s.date, amount: s.qty * s.sellPrice, description: `Jual: ${s.productName}`, category: TransactionCategory.PENJUALAN, type: TransactionType.IN, related_sale_id: sD[0].id }]);
     fetchData();
   };
 
-  if (isLoading) return <div className="p-20 text-center">Loading...</div>;
+  if (isLoading) return <div className="min-h-screen flex items-center justify-center font-bold">Menghubungkan ke Cloud...</div>;
   if (!session) return <Login onLoginSuccess={() => {}} />;
 
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'cash', label: 'Kas', icon: Wallet },
-    { id: 'inventory', label: 'Stok', icon: Package },
-    { id: 'sales', label: 'Jual', icon: ShoppingCart },
+    { id: 'cash', label: 'Buku Kas', icon: Wallet },
+    { id: 'inventory', label: 'Stok Barang', icon: Package },
+    { id: 'sales', label: 'Penjualan', icon: ShoppingCart },
     { id: 'reports', label: 'Laporan', icon: BarChart3 },
-    { id: 'settings', label: 'Setting', icon: SettingsIcon }
+    { id: 'settings', label: 'Pengaturan', icon: SettingsIcon },
   ];
 
   return (
-    <div className="min-h-screen flex bg-slate-50">
+    <div className="min-h-screen flex flex-col md:flex-row bg-slate-50">
       <aside className={`fixed inset-y-0 left-0 z-40 w-64 bg-slate-900 transform transition-transform md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="p-6 text-white font-bold flex items-center gap-2"><Cloud className="text-indigo-400" /> {businessName}</div>
+        <div className="p-6 text-white font-black italic flex items-center gap-2"><Cloud className="text-indigo-500" /> {businessName}</div>
         <nav className="p-4 space-y-2">
-          {tabs.map(t => (
-            <button key={t.id} onClick={() => { setActiveTab(t.id); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm ${activeTab === t.id ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}>
-              <t.icon size={18} /> {t.label}
+          {tabs.map(tab => (
+            <button key={tab.id} onClick={() => { setActiveTab(tab.id); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm transition ${activeTab === tab.id ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-800'}`}>
+              <tab.icon size={20} /> {tab.label}
             </button>
           ))}
         </nav>
-        <button onClick={() => supabase.auth.signOut()} className="absolute bottom-4 left-6 text-slate-500 text-xs flex items-center gap-2"><LogOut size={14}/> Logout</button>
+        <button onClick={() => supabase.auth.signOut()} className="absolute bottom-6 left-6 text-slate-500 hover:text-red-400 flex items-center gap-2 text-xs font-bold"><LogOut size={14} /> Keluar</button>
       </aside>
+
       <main className="flex-1 p-4 md:p-8 overflow-auto">
-        {activeTab === 'dashboard' && <Dashboard state={state} />}
-        {activeTab === 'cash' && <CashBook transactions={state.transactions} onAdd={(t:any) => { supabase.from('transactions').insert([t]).then(() => fetchData()); }} onAddBatch={addBatch} onDelete={() => {}} />}
-        {activeTab === 'inventory' && <Inventory batches={state.batches} productionUsages={state.productionUsages} onAddBatch={addBatch} onDeleteBatch={() => {}} onUseProductionStock={() => {}} onDeleteProductionUsage={() => {}} />}
-        {activeTab === 'sales' && <Sales sales={state.sales} batches={state.batches} onAddSale={addSale} onDeleteSale={() => {}} />}
-        {activeTab === 'reports' && <Reports state={state} businessName={businessName} />}
-        {activeTab === 'settings' && <Settings userId={session.user.id} onNameUpdated={(n) => setBusinessName(n)} />}
+        <div className="max-w-7xl mx-auto">
+          {activeTab === 'dashboard' && <Dashboard state={state} />}
+          {activeTab === 'cash' && <CashBook transactions={state.transactions} onAdd={(t:any) => supabase.from('transactions').insert([t]).then(() => fetchData())} onAddBatch={addBatch} onDelete={(id) => supabase.from('transactions').delete().eq('id', id).then(() => fetchData())} />}
+          {activeTab === 'inventory' && <Inventory batches={state.batches} productionUsages={state.productionUsages} onAddBatch={addBatch} onDeleteBatch={(id) => supabase.from('batches').delete().eq('id', id).then(() => fetchData())} onUseProductionStock={() => {}} onDeleteProductionUsage={() => {}} />}
+          {activeTab === 'sales' && <Sales sales={state.sales} batches={state.batches} onAddSale={addSale} onDeleteSale={(id) => supabase.from('sales').delete().eq('id', id).then(() => fetchData())} />}
+          {activeTab === 'reports' && <Reports state={state} businessName={businessName} />}
+          {activeTab === 'settings' && <Settings userId={session.user.id} onNameUpdated={(n) => setBusinessName(n)} />}
+        </div>
       </main>
-      <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="md:hidden fixed bottom-4 right-4 p-4 bg-indigo-600 text-white rounded-full shadow-lg"><Menu size={24} /></button>
+      <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="md:hidden fixed bottom-4 right-4 p-4 bg-indigo-600 text-white rounded-full shadow-lg z-50"><Menu size={24} /></button>
     </div>
   );
 };
