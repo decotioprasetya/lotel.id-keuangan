@@ -6,8 +6,9 @@ import Inventory from './components/Inventory';
 import Sales from './components/Sales';
 import Reports from './components/Reports';
 import Login from './components/Login';
+import Settings from './components/Settings'; // 1. Pastikan lo buat file ini ya Bre!
 import { supabase } from './utils/supabase';
-import { LayoutDashboard, Wallet, Package, ShoppingCart, BarChart3, Menu, X, Cloud, LogOut, CloudCheck } from 'lucide-react';
+import { LayoutDashboard, Wallet, Package, ShoppingCart, BarChart3, Menu, X, Cloud, LogOut, CloudCheck, Settings as SettingsIcon } from 'lucide-react';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -15,6 +16,9 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  
+  // 2. State untuk Nama UMKM Dinamis
+  const [businessName, setBusinessName] = useState('UMKM PRO');
 
   // Mappers to bridge Application (camelCase) and Database (snake_case)
   const mapBatchFromDB = (b: any): StockBatch => ({
@@ -62,6 +66,10 @@ const App: React.FC = () => {
   const fetchAllData = async () => {
     setIsLoading(true);
     try {
+      // 3. Tarik Nama Bisnis dari Supabase
+      const { data: profileData } = await supabase.from('profile').select('business_name').single();
+      if (profileData) setBusinessName(profileData.business_name);
+
       const [transRes, batchRes, saleRes, prodRes] = await Promise.all([
         supabase.from('transactions').select('*').order('date', { ascending: false }),
         supabase.from('batches').select('*').order('date', { ascending: true }),
@@ -153,282 +161,4 @@ const App: React.FC = () => {
       description: `Beli Stok: ${b.productName} (${b.initialQty} unit)`,
       category: TransactionCategory.BELI_STOK,
       type: TransactionType.OUT,
-      related_stock_batch_id: batchData[0].id
-    };
-
-    const { data: transData } = await supabase.from('transactions').insert([dbTrans]).select();
-    
-    setState(prev => ({
-      ...prev,
-      batches: [...prev.batches, mapBatchFromDB(batchData[0])],
-      transactions: [mapTransactionFromDB(transData![0]), ...prev.transactions]
-    }));
-  }, []);
-
-  const deleteBatch = useCallback(async (id: string) => {
-    const batch = state.batches.find(b => b.id === id);
-    if (!batch) return;
-    if (batch.currentQty < batch.initialQty) {
-      alert("Batch ini sudah ada yang terjual/terpakai. Tidak bisa dihapus.");
-      return;
-    }
-    
-    await supabase.from('transactions').delete().eq('related_stock_batch_id', id);
-    const { error } = await supabase.from('batches').delete().eq('id', id);
-    
-    if (error) { alert(error.message); return; }
-    setState(prev => ({ 
-      ...prev, 
-      batches: prev.batches.filter(b => b.id !== id),
-      transactions: prev.transactions.filter(t => t.relatedStockBatchId !== id)
-    }));
-  }, [state.batches]);
-
-  const addProductionUsage = useCallback(async (u: { date: string, productName: string, qty: number }) => {
-    let remaining = u.qty;
-    let totalUsageCost = 0;
-    const usages: SaleItemUsage[] = [];
-    const productBatches = [...state.batches]
-      .filter(b => b.productName === u.productName && b.currentQty > 0)
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-    if (productBatches.reduce((s, b) => s + b.currentQty, 0) < u.qty) {
-      alert("Stok bahan tidak cukup.");
-      return;
-    }
-
-    for (const batch of productBatches) {
-      if (remaining <= 0) break;
-      const take = Math.min(batch.currentQty, remaining);
-      remaining -= take;
-      totalUsageCost += take * batch.buyPrice;
-      usages.push({ batchId: batch.id, qtyUsed: take, costPerUnit: batch.buyPrice });
-      
-      await supabase.from('batches').update({ current_qty: batch.currentQty - take }).eq('id', batch.id);
-    }
-
-    await supabase.from('production_usages').insert([{
-      date: u.date,
-      product_name: u.productName,
-      qty: u.qty,
-      total_cost: totalUsageCost,
-      batch_usages: usages
-    }]);
-
-    fetchAllData();
-  }, [state.batches]);
-
-  const addSale = useCallback(async (s: { date: string, productName: string, qty: number, sellPrice: number }) => {
-    let remaining = s.qty;
-    let totalCOGS = 0;
-    const usages: SaleItemUsage[] = [];
-    const productBatches = [...state.batches]
-      .filter(b => b.productName === s.productName && b.currentQty > 0)
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-    if (productBatches.reduce((sum, b) => sum + b.currentQty, 0) < s.qty) {
-      alert("Stok barang tidak cukup.");
-      return;
-    }
-
-    for (const batch of productBatches) {
-      if (remaining <= 0) break;
-      const take = Math.min(batch.currentQty, remaining);
-      remaining -= take;
-      totalCOGS += take * batch.buyPrice;
-      usages.push({ batchId: batch.id, qtyUsed: take, costPerUnit: batch.buyPrice });
-      
-      await supabase.from('batches').update({ current_qty: batch.currentQty - take }).eq('id', batch.id);
-    }
-
-    const totalRevenue = s.qty * s.sellPrice;
-    const { data: saleData } = await supabase.from('sales').insert([{
-      date: s.date,
-      product_name: s.product_name,
-      qty: s.qty,
-      sell_price: s.sellPrice,
-      total_revenue: totalRevenue,
-      total_cogs: totalCOGS,
-      batch_usages: usages
-    }]).select();
-
-    await supabase.from('transactions').insert([{
-      date: s.date,
-      amount: totalRevenue,
-      description: `Jual: ${s.product_name} (${s.qty} unit)`,
-      category: TransactionCategory.PENJUALAN,
-      type: TransactionType.IN,
-      related_sale_id: saleData![0].id
-    }]);
-
-    fetchAllData();
-  }, [state.batches]);
-
-  const deleteSale = async (id: string) => {
-    const sale = state.sales.find(s => s.id === id);
-    if (!sale) return;
-
-    if (confirm("Hapus penjualan? Stok akan dikembalikan otomatis.")) {
-      for (const usage of sale.batchUsages) {
-        const batch = state.batches.find(b => b.id === usage.batchId);
-        if (batch) {
-          await supabase.from('batches').update({ current_qty: batch.currentQty + usage.qtyUsed }).eq('id', batch.id);
-        }
-      }
-      
-      await supabase.from('transactions').delete().eq('related_sale_id', id);
-      await supabase.from('sales').delete().eq('id', id);
-      fetchAllData();
-    }
-  };
-
-  const handleLogout = async () => {
-    const confirmLogout = window.confirm("Yakin mau logout, Bre?");
-    if (confirmLogout) {
-      await supabase.auth.signOut();
-      setSession(null);
-      setState({ transactions: [], batches: [], sales: [], productionUsages: [] });
-    }
-  };
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-8">
-        <div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-xl shadow-indigo-100 mb-6 animate-bounce">
-           <Cloud className="text-white w-8 h-8" />
-        </div>
-        <h2 className="text-xl font-black text-slate-900 tracking-tighter uppercase">Menghubungkan ke Cloud...</h2>
-        <p className="text-slate-400 text-sm mt-2 font-medium">Sinkronisasi database sedang berlangsung</p>
-      </div>
-    );
-  }
-
-  if (!session) return <Login onLoginSuccess={() => {}} />;
-
-  const tabs = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'cash', label: 'Buku Kas', icon: Wallet },
-    { id: 'inventory', label: 'Stok Barang', icon: Package },
-    { id: 'sales', label: 'Penjualan', icon: ShoppingCart },
-    { id: 'reports', label: 'Laporan', icon: BarChart3 },
-  ];
-
-  return (
-    <div className="min-h-screen flex flex-col md:flex-row">
-      <div className="md:hidden bg-indigo-900 text-white p-4 flex justify-between items-center sticky top-0 z-50">
-        <h1 className="text-xl font-bold italic tracking-tighter">UMKM PRO CLOUD</h1>
-        <button onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
-          {isSidebarOpen ? <X /> : <Menu />}
-        </button>
-      </div>
-
-      <aside className={`
-        fixed inset-y-0 left-0 z-40 w-64 bg-slate-900 text-slate-300 transform transition-transform duration-300 ease-in-out md:translate-x-0 md:static md:block
-        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-      `}>
-        <div className="h-full flex flex-col">
-          <div className="p-6 hidden md:block">
-            <h1 className="text-2xl font-black text-white italic tracking-tighter flex items-center gap-2">
-              <Cloud className="text-indigo-500" /> UMKM PRO
-            </h1>
-            <p className="text-[10px] text-slate-500 uppercase font-bold mt-1 tracking-widest">Enterprise Cloud Edition</p>
-          </div>
-          
-          <nav className="flex-1 px-4 mt-4 space-y-2">
-            {tabs.map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => { setActiveTab(tab.id); setIsSidebarOpen(false); }}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition font-medium text-sm
-                  ${activeTab === tab.id 
-                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40' 
-                    : 'hover:bg-slate-800 hover:text-white'}
-                `}
-              >
-                <tab.icon size={20} />
-                {tab.label}
-              </button>
-            ))}
-          </nav>
-
-          <div className="p-6 border-t border-slate-800 space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-white font-bold border-2 border-indigo-500/30">
-                {session?.user?.email?.charAt(0).toUpperCase()}
-              </div>
-              <div className="flex-1 overflow-hidden">
-                <p className="text-xs font-bold text-white truncate">{session?.user?.email}</p>
-                <p className="text-[9px] text-green-500 flex items-center gap-1 font-bold uppercase tracking-widest"><CloudCheck size={10} /> Terhubung</p>
-              </div>
-            </div>
-            <button 
-              onClick={handleLogout}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 text-slate-400 hover:bg-red-600 hover:text-white transition text-xs font-bold shadow-inner"
-            >
-              <LogOut size={14} /> Keluar Akun
-            </button>
-          </div>
-        </div>
-      </aside>
-
-      {isSidebarOpen && (
-        <div className="fixed inset-0 bg-black/50 z-30 md:hidden" onClick={() => setIsSidebarOpen(false)} />
-      )}
-
-      <main className="flex-1 p-4 md:p-8 overflow-y-auto bg-slate-50">
-        <header className="mb-8 hidden md:flex items-center justify-between">
-          <div>
-            <h2 className="text-2xl font-bold text-slate-800 capitalize tracking-tight">{activeTab.replace('-', ' ')}</h2>
-            <div className="flex items-center gap-2 text-xs text-slate-500 mt-1">
-              <CloudCheck size={14} className="text-indigo-500" />
-              Tersinkronisasi otomatis ke cloud: <span className="font-bold">{new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long' })}</span>
-            </div>
-          </div>
-          <div className="text-sm text-slate-400 font-bold bg-white px-4 py-2 rounded-xl shadow-sm border border-slate-100 flex items-center gap-3">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            Online
-          </div>
-        </header>
-
-        <div className="max-w-7xl mx-auto">
-          {activeTab === 'dashboard' && <Dashboard state={state} />}
-          {activeTab === 'cash' && (
-            <CashBook 
-              transactions={state.transactions} 
-              onAdd={addTransaction} 
-              onAddBatch={addBatch}
-              onDelete={deleteTransaction} 
-            />
-          )}
-          {activeTab === 'inventory' && (
-            <Inventory 
-              batches={state.batches} 
-              productionUsages={state.productionUsages}
-              onAddBatch={addBatch} 
-              onDeleteBatch={deleteBatch} 
-              onUseProductionStock={addProductionUsage}
-              onDeleteProductionUsage={async (id) => {
-                const confirmDelete = window.confirm("Hapus catatan pemakaian?");
-                if (confirmDelete) {
-                  await supabase.from('production_usages').delete().eq('id', id);
-                  fetchAllData();
-                }
-              }}
-            />
-          )}
-          {activeTab === 'sales' && (
-            <Sales 
-              sales={state.sales} 
-              batches={state.batches} 
-              onAddSale={addSale} 
-              onDeleteSale={deleteSale} 
-            />
-          )}
-          {activeTab === 'reports' && <Reports state={state} />}
-        </div>
-      </main>
-    </div>
-  );
-};
-
-export default App;
+      related_stock_batch_id
