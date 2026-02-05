@@ -1,7 +1,7 @@
-
 import React, { useState } from 'react';
 import { supabase } from '../utils/supabase';
-import { LogIn, UserPlus, ShieldCheck, Cloud, Loader2 } from 'lucide-react';
+// Tambahin Eye dan EyeOff di sini
+import { LogIn, UserPlus, ShieldCheck, Cloud, Loader2, Eye, EyeOff } from 'lucide-react';
 
 interface Props {
   onLoginSuccess: () => void;
@@ -13,6 +13,8 @@ const Login: React.FC<Props> = ({ onLoginSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [isRegister, setIsRegister] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 1. Tambahin state buat kontrol sembunyi/lihat sandi
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,16 +67,28 @@ const Login: React.FC<Props> = ({ onLoginSuccess }) => {
                 placeholder="email@bisnisanda.com"
               />
             </div>
+            
             <div>
               <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Kata Sandi</label>
-              <input 
-                type="password" 
-                required 
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition"
-                placeholder="••••••••"
-              />
+              {/* 2. Bungkus input dengan div relative supaya icon bisa ditaruh di dalam */}
+              <div className="relative">
+                <input 
+                  type={showPassword ? "text" : "password"} // 3. Tipe input berubah sesuai state
+                  required 
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 pr-12 outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition"
+                  placeholder="••••••••"
+                />
+                {/* 4. Tombol mata */}
+                <button
+                  type="button" // Wajib type="button" biar gak auto-submit form
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-indigo-600 transition-colors"
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
             </div>
 
             {error && (
