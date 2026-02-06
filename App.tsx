@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { AppState, Transaction, TransactionType, TransactionCategory, StockBatch, Sale, StockType } from './types';
 import Dashboard from './components/Dashboard';
@@ -19,6 +20,7 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [businessName, setBusinessName] = useState('UMKM PRO');
 
+  // MAPPING: Pastikan data dari snake_case (DB) ke camelCase (App)
   const mapBatch = (b: any): StockBatch => ({ id: b.id, date: b.date, productName: b.product_name, initialQty: b.initial_qty, currentQty: b.current_qty, buyPrice: Number(b.buy_price), totalCost: Number(b.total_cost), stockType: b.stock_type });
   const mapTrans = (t: any): Transaction => ({ id: t.id, date: t.date, amount: Number(t.amount), description: t.description, category: t.category, type: t.type, relatedSaleId: t.related_sale_id, relatedStockBatchId: t.related_stock_batch_id });
   const mapSale = (s: any): Sale => ({ id: s.id, date: s.date, productName: s.product_name, qty: s.qty, sellPrice: Number(s.sell_price), totalRevenue: Number(s.total_revenue), totalCOGS: Number(s.total_cogs), batchUsages: s.batch_usages });
@@ -41,9 +43,12 @@ const App: React.FC = () => {
         batches: (b.data || []).map(mapBatch),
         sales: (s.data || []).map(mapSale),
         productionUsages: (p.data || []).map((u: any) => ({ 
-          ...u, 
-          productName: u.product_name, // Mapping field ke camelCase
-          totalCost: Number(u.total_cost) 
+          id: u.id,
+          date: u.date,
+          productName: u.product_name, // DIPERBAIKI: Harus ambil dari product_name DB
+          qty: u.qty,
+          totalCost: Number(u.total_cost), // DIPERBAIKI: Harus ambil dari total_cost DB
+          batchId: u.batch_id
         }))
       });
     } catch (e) { 
@@ -134,27 +139,26 @@ const App: React.FC = () => {
     setIsLoading(true);
     const today = new Date().toISOString().split('T')[0];
     try {
-      // 1. Potong Stok Bahan Baku & Catat Riwayat Pemakaian
+      // 1. Potong Stok Bahan Baku & Catat Riwayat
       for (const ing of p.ingredients) {
-        // Ambil data batch terbaru dari DB untuk memastikan qty akurat
         const { data: b } = await supabase.from('batches').select('current_qty, buy_price').eq('id', ing.batchId).single();
         if (b) {
-          // Update Sisa Stok di Batch
           await supabase.from('batches').update({ current_qty: b.current_qty - ing.qty }).eq('id', ing.batchId);
           
           // CATAT RIWAYAT PEMAKAIAN BAHAN
-          await supabase.from('production_usages').insert([{
+          const { error: usageError } = await supabase.from('production_usages').insert([{
             date: today,
-            product_name: ing.productName, // Nama bahan yang dipakai
+            product_name: ing.productName, 
             qty: ing.qty,
             total_cost: b.buy_price * ing.qty,
             batch_id: ing.batchId,
             user_id: session?.user.id
           }]);
+          if (usageError) throw usageError;
         }
       }
       
-      // 2. Tambah Stok Barang Jadi (Label "Dijual")
+      // 2. Tambah Stok Barang Jadi
       await supabase.from('batches').insert([{ 
         date: today, 
         product_name: p.productName, 
@@ -165,18 +169,18 @@ const App: React.FC = () => {
         stock_type: StockType.FOR_SALE 
       }]);
 
-      // 3. Catat Biaya Operasional di Buku Kas
+      // 3. Catat Biaya Operasional
       if (p.totalOpCost > 0) {
         await supabase.from('transactions').insert([{ 
           date: today, 
           amount: p.totalOpCost, 
-          description: `Biaya Operasional Produksi: ${p.productName}`, 
+          description: `Produksi: ${p.productName} (Ops)`, 
           category: TransactionCategory.BIAYA, 
           type: TransactionType.OUT 
         }]);
       }
 
-      // 4. Simpan Log Detail Produksi ke tabel Productions
+      // 4. Log Produksi
       await supabase.from('productions').insert([{ 
         result_product_name: p.productName, 
         result_qty: p.qty, 
@@ -191,16 +195,16 @@ const App: React.FC = () => {
       await fetchData();
       setActiveTab('inventory'); 
       alert(`Produksi ${p.productName} Berhasil!`);
-    } catch (e) { 
+    } catch (e: any) { 
       console.error(e); 
-      alert("Gagal memproses produksi!"); 
+      alert("Error Simpan: " + e.message); 
     } finally { 
       setIsLoading(false); 
     }
   };
 
   const deleteProductionUsage = async (id: string) => {
-    if (!window.confirm("Hapus catatan pemakaian ini? (Stok tidak akan kembali)")) return;
+    if (!window.confirm("Hapus catatan pemakaian ini?")) return;
     try {
       await supabase.from('production_usages').delete().eq('id', id);
       fetchData();
@@ -255,7 +259,7 @@ const App: React.FC = () => {
               productionUsages={state.productionUsages} 
               onAddBatch={addBatch} 
               onDeleteBatch={(id) => window.confirm("Hapus data stok ini?") && supabase.from('batches').delete().eq('id', id).then(() => fetchData())} 
-              onUseProductionStock={() => {}} // Fungsi manual jika dibutuhkan
+              onUseProductionStock={() => {}} 
               onDeleteProductionUsage={deleteProductionUsage} 
             />
           )}
