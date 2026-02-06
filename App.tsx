@@ -19,7 +19,7 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [businessName, setBusinessName] = useState('UMKM PRO');
 
-  // MAPPING: Database -> State Aplikasi
+  // MAPPING DATA DARI SUPABASE KE STATE APLIKASI
   const mapBatch = (b: any): StockBatch => ({ id: b.id, date: b.date, productName: b.product_name, initialQty: b.initial_qty, currentQty: b.current_qty, buyPrice: Number(b.buy_price), totalCost: Number(b.total_cost), stockType: b.stock_type });
   const mapTrans = (t: any): Transaction => ({ id: t.id, date: t.date, amount: Number(t.amount), description: t.description, category: t.category, type: t.type, relatedSaleId: t.related_sale_id, relatedStockBatchId: t.related_stock_batch_id });
   const mapSale = (s: any): Sale => ({ id: s.id, date: s.date, productName: s.product_name, qty: s.qty, sell_price: s.sell_price, totalRevenue: Number(s.total_revenue), totalCOGS: Number(s.total_cogs), batchUsages: s.batch_usages });
@@ -29,18 +29,20 @@ const App: React.FC = () => {
     try {
       const { data: prof } = await supabase.from('profile').select('business_name').maybeSingle();
       if (prof) setBusinessName(prof.business_name);
+      
       const [t, b, s, p] = await Promise.all([
         supabase.from('transactions').select('*').order('date', { ascending: false }),
         supabase.from('batches').select('*').order('date', { ascending: true }),
         supabase.from('sales').select('*').order('date', { ascending: false }),
         supabase.from('production_usages').select('*').order('date', { ascending: false })
       ]);
+
       setState({
         transactions: (t.data || []).map(mapTrans),
         batches: (b.data || []).map(mapBatch),
         sales: (s.data || []).map(mapSale),
         productionUsages: (p.data || []).map((u: any) => ({ 
-          id: u.id, date: u.date, productName: u.product_name, targetProduct: u.target_product,
+          id: u.id, date: u.date, productName: u.product_name, targetProduct: u.target_product, 
           qty: u.qty, totalCost: Number(u.total_cost), batchId: u.batch_id 
         }))
       });
@@ -53,22 +55,16 @@ const App: React.FC = () => {
     return () => subscription.unsubscribe();
   }, []);
 
-  // FITUR: BELI STOK (INPUT MANUAL) - FIXED COLUMN NAMES
+  // 1. INPUT STOK MANUAL (BELI BAHAN)
   const addBatch = async (b: any) => {
     setIsLoading(true);
     const cost = Number(b.initialQty) * Number(b.buyPrice);
     try {
       const { data: bD, error } = await supabase.from('batches').insert([{ 
-        date: b.date, 
-        product_name: b.productName, 
-        initial_qty: b.initialQty, 
-        current_qty: b.initialQty, 
-        buy_price: b.buyPrice, 
-        total_cost: cost, 
-        stock_type: b.stockType, // Pastikan pakai snake_case sesuai DB
-        user_id: session?.user.id 
+        date: b.date, product_name: b.productName, initial_qty: b.initialQty, 
+        current_qty: b.initialQty, buy_price: b.buyPrice, total_cost: cost, 
+        stock_type: b.stockType, user_id: session?.user.id 
       }]).select();
-      
       if (error) throw error;
       if (bD) {
         await supabase.from('transactions').insert([{ 
@@ -78,11 +74,10 @@ const App: React.FC = () => {
         }]);
       }
       await fetchData();
-      alert("Stok Berhasil Masuk!");
-    } catch (e: any) { alert("Gagal Simpan Stok: " + e.message); } finally { setIsLoading(false); }
+    } catch (e: any) { alert(e.message); } finally { setIsLoading(false); }
   };
 
-  // FITUR: PRODUKSI (KONVERSI) - FIXED COLUMN NAMES
+  // 2. PRODUKSI (KONVERSI STOK)
   const addProduction = async (p: any) => {
     setIsLoading(true);
     const today = new Date().toISOString().split('T')[0];
@@ -105,28 +100,54 @@ const App: React.FC = () => {
       }
       await supabase.from('batches').insert([{ 
         date: today, product_name: targetName, initial_qty: p.qty, current_qty: p.qty, 
-        buy_price: p.hpp, total_cost: p.hpp * p.qty, stock_type: StockType.FOR_SALE,
-        user_id: session?.user.id
+        buy_price: p.hpp, total_cost: p.hpp * p.qty, stock_type: StockType.FOR_SALE, user_id: session?.user.id
       }]);
       await supabase.from('transactions').insert([{ 
-        date: today, amount: p.totalOpCost + totalIngCost, 
-        description: `Produksi: ${targetName}. Bahan: ${summary.join(', ')}`, 
+        date: today, amount: p.totalOpCost + totalIngCost, description: `Produksi: ${targetName}`, 
         category: TransactionCategory.BIAYA, type: TransactionType.OUT, user_id: session?.user.id
       }]);
       await fetchData();
       setActiveTab('production');
-      alert(`Produksi Berhasil!`);
-    } catch (e: any) { alert("Gagal Produksi: " + e.message); } finally { setIsLoading(false); }
+    } catch (e: any) { alert(e.message); } finally { setIsLoading(false); }
   };
 
+  // 3. PENJUALAN (POTONG STOK OTOMATIS)
   const addSale = async (s: any) => {
-    let rem = s.qty; let cogs = 0; const usg: any[] = [];
-    const pB = [...state.batches].filter(b => b.productName === s.productName && b.currentQty > 0 && b.stockType === StockType.FOR_SALE).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    if (pB.reduce((sum, b) => sum + b.currentQty, 0) < s.qty) return alert("Stok kurang!");
-    for (const b of pB) { if (rem <= 0) break; const take = Math.min(b.currentQty, rem); rem -= take; cogs += take * b.buyPrice; usg.push({ batchId: b.id, qtyUsed: take, costPerUnit: b.buyPrice }); await supabase.from('batches').update({ current_qty: b.current_qty - take }).eq('id', b.id); }
-    const { data: sD } = await supabase.from('sales').insert([{ date: s.date, product_name: s.product_name, qty: s.qty, sell_price: s.sell_price, total_revenue: s.qty * s.sell_price, total_cogs: cogs, batch_usages: usg, user_id: session?.user.id }]).select();
-    if (sD) await supabase.from('transactions').insert([{ date: s.date, amount: s.qty * s.sell_price, description: `Jual: ${s.productName}`, category: TransactionCategory.PENJUALAN, type: TransactionType.IN, related_sale_id: sD[0].id, user_id: session?.user.id }]);
-    fetchData();
+    setIsLoading(true);
+    let rem = Number(s.qty);
+    let cogs = 0;
+    const usg: any[] = [];
+    const pB = [...state.batches].filter(b => 
+      b.productName.trim().toLowerCase() === s.productName.trim().toLowerCase() && 
+      b.currentQty > 0 && b.stockType === StockType.FOR_SALE
+    ).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    if (pB.reduce((sum, b) => sum + b.currentQty, 0) < rem) {
+      setIsLoading(false);
+      return alert("Stok kurang!");
+    }
+
+    try {
+      for (const b of pB) {
+        if (rem <= 0) break;
+        const take = Math.min(b.currentQty, rem);
+        rem -= take;
+        cogs += take * b.buyPrice;
+        usg.push({ batchId: b.id, qtyUsed: take, costPerUnit: b.buyPrice });
+        await supabase.from('batches').update({ current_qty: b.current_qty - take }).eq('id', b.id);
+      }
+      const { data: sD } = await supabase.from('sales').insert([{ 
+        date: s.date, product_name: s.productName, qty: s.qty, sell_price: s.sellPrice, 
+        total_revenue: s.qty * s.sellPrice, total_cogs: cogs, batch_usages: usg, user_id: session?.user.id 
+      }]).select();
+      if (sD) {
+        await supabase.from('transactions').insert([{ 
+          date: s.date, amount: s.qty * s.sellPrice, description: `Jual: ${s.productName}`, 
+          category: TransactionCategory.PENJUALAN, type: TransactionType.IN, related_sale_id: sD[0].id, user_id: session?.user.id
+        }]);
+      }
+      await fetchData();
+    } catch (e: any) { alert(e.message); } finally { setIsLoading(false); }
   };
 
   if (isLoading) return <div className="min-h-screen flex items-center justify-center font-black italic text-slate-400">MEMUAT...</div>;
@@ -147,7 +168,7 @@ const App: React.FC = () => {
       <main className="flex-1 p-4 md:p-8 overflow-auto h-screen">
         <div className="max-w-7xl mx-auto">
           {activeTab === 'dashboard' && <Dashboard state={state} />}
-          {activeTab === 'cash' && <CashBook transactions={state.transactions} onAdd={(t:any) => fetchData()} onAddBatch={addBatch} onDelete={() => fetchData()} />}
+          {activeTab === 'cash' && <CashBook transactions={state.transactions} onAdd={() => fetchData()} onAddBatch={addBatch} onDelete={() => fetchData()} />}
           {activeTab === 'inventory' && <Inventory batches={state.batches} productionUsages={state.productionUsages} onAddBatch={addBatch} onDeleteBatch={() => fetchData()} onUseProductionStock={() => {}} onDeleteProductionUsage={() => fetchData()} />}
           {activeTab === 'production' && <Production batches={state.batches} productionUsages={state.productionUsages} onAddProduction={addProduction} />}
           {activeTab === 'sales' && <Sales sales={state.sales} batches={state.batches} onAddSale={addSale} onDeleteSale={() => fetchData()} />}
