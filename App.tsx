@@ -130,11 +130,13 @@ const App: React.FC = () => {
   const addProduction = async (p: any) => {
     setIsLoading(true);
     try {
+      // 1. Potong Stok Bahan Baku
       for (const ing of p.ingredients) {
         const { data: b } = await supabase.from('batches').select('current_qty').eq('id', ing.batchId).single();
         if (b) await supabase.from('batches').update({ current_qty: b.current_qty - ing.qty }).eq('id', ing.batchId);
       }
       
+      // 2. Tambah Stok Barang Jadi (Kategori "Dijual")
       await supabase.from('batches').insert([{ 
         date: new Date().toISOString().split('T')[0], 
         product_name: p.productName, 
@@ -142,19 +144,21 @@ const App: React.FC = () => {
         current_qty: p.qty, 
         buy_price: p.hpp, 
         total_cost: p.hpp * p.qty, 
-        stock_type: 'FOR_SALE' 
+        stock_type: StockType.FOR_SALE // Akan mengirim teks "Dijual" sesuai enum lo
       }]);
 
+      // 3. Catat Biaya Operasional (Gunakan Kategori "Biaya")
       if (p.totalOpCost > 0) {
         await supabase.from('transactions').insert([{ 
           date: new Date().toISOString().split('T')[0], 
           amount: p.totalOpCost, 
           description: `Produksi: ${p.productName} (Biaya Ops)`, 
-          category: TransactionCategory.OPERASIONAL, 
+          category: TransactionCategory.BIAYA, // Sesuai enum: 'Biaya'
           type: TransactionType.OUT 
         }]);
       }
 
+      // 4. Simpan Riwayat Produksi
       await supabase.from('productions').insert([{ 
         result_product_name: p.productName, 
         result_qty: p.qty, 
@@ -167,7 +171,7 @@ const App: React.FC = () => {
       }]);
       
       await fetchData();
-      setActiveTab('inventory');
+      setActiveTab('inventory'); // Lari ke tab stok buat ngecek barangnya
     } catch (e) { 
       console.error(e); 
       alert("Gagal memproses produksi!"); 
