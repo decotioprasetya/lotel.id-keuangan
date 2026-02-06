@@ -21,7 +21,7 @@ const App: React.FC = () => {
 
   const mapBatch = (b: any): StockBatch => ({ id: b.id, date: b.date, productName: b.product_name, initialQty: b.initial_qty, currentQty: b.current_qty, buyPrice: Number(b.buy_price), totalCost: Number(b.total_cost), stockType: b.stock_type });
   const mapTrans = (t: any): Transaction => ({ id: t.id, date: t.date, amount: Number(t.amount), description: t.description, category: t.category, type: t.type, relatedSaleId: t.related_sale_id, relatedStockBatchId: t.related_stock_batch_id });
-  const mapSale = (s: any): Sale => ({ id: s.id, date: s.date, productName: s.product_name, qty: s.qty, sellPrice: Number(s.sell_price), totalRevenue: Number(s.total_revenue), totalCOGS: Number(s.total_cogs), batchUsages: s.batch_usages });
+  const mapSale = (s: any): Sale => ({ id: s.id, date: s.date, productName: s.product_name, qty: s.qty, sell_price: s.sell_price, totalRevenue: Number(s.total_revenue), totalCOGS: Number(s.total_cogs), batchUsages: s.batch_usages });
 
   const fetchData = async () => {
     setIsLoading(true);
@@ -98,6 +98,7 @@ const App: React.FC = () => {
     fetchData();
   };
 
+  // --- LOGIKA PRODUKSI AKUNTANSI PRO ---
   const addProduction = async (p: any) => {
     setIsLoading(true);
     const today = new Date().toISOString().split('T')[0];
@@ -108,6 +109,7 @@ const App: React.FC = () => {
         if (b) {
           const cost = Number(b.buy_price) * Number(ing.qty);
           totalIngredientCost += cost;
+          // 1. Potong stok bahan baku (Hanya pindah aset)
           await supabase.from('batches').update({ current_qty: b.current_qty - ing.qty }).eq('id', ing.batchId);
           await supabase.from('production_usages').insert([{
             date: today, product_name: b.product_name, qty: Number(ing.qty), total_cost: cost, batch_id: ing.batchId, user_id: session?.user.id, batch_usages: [] 
@@ -115,20 +117,22 @@ const App: React.FC = () => {
         }
       }
       
+      // 2. Tambah stok barang jadi (Hanya pindah aset)
       await supabase.from('batches').insert([{ 
         date: today, product_name: p.productName, initial_qty: p.qty, current_qty: p.qty, 
         buy_price: p.hpp, total_cost: p.hpp * p.qty, stock_type: StockType.FOR_SALE 
       }]);
 
-      if (totalIngredientCost > 0) {
-        await supabase.from('transactions').insert([{ 
-          date: today, amount: totalIngredientCost, description: `Modal Bahan Baku: ${p.productName}`, category: TransactionCategory.BIAYA, type: TransactionType.OUT 
-        }]);
-      }
+      // 3. Catat di Kas HANYA untuk Biaya Operasional (Listrik, Jahit, dll)
+      // Duit bahan TIDAK dicatat lagi karena sudah keluar pas beli stok awal
       if (p.totalOpCost > 0) {
         const opDetailNames = p.opCosts.map((o: any) => o.name).join(', ');
         await supabase.from('transactions').insert([{ 
-          date: today, amount: p.totalOpCost, description: `Biaya Op (${opDetailNames}): ${p.productName}`, category: TransactionCategory.BIAYA, type: TransactionType.OUT 
+          date: today, 
+          amount: p.totalOpCost, 
+          description: `Biaya Op (${opDetailNames}): ${p.productName}`, 
+          category: TransactionCategory.BIAYA, 
+          type: TransactionType.OUT 
         }]);
       }
 
@@ -139,7 +143,7 @@ const App: React.FC = () => {
       
       await fetchData();
       setActiveTab('inventory'); 
-      alert(`Produksi ${p.productName} Berhasil! Kas terpotong.`);
+      alert(`Produksi ${p.productName} Berhasil! Stok bahan baku telah dikonversi menjadi barang jadi.`);
     } catch (e: any) { alert("Error: " + e.message); } finally { setIsLoading(false); }
   };
 
