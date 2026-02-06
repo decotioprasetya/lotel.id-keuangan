@@ -7,8 +7,9 @@ import Sales from './components/Sales';
 import Reports from './components/Reports';
 import Login from './components/Login';
 import Settings from './components/Settings';
+import Production from './components/Production'; // Import Komponen Baru
 import { supabase } from './utils/supabase';
-import { LayoutDashboard, Wallet, Package, ShoppingCart, BarChart3, Menu, X, Cloud, LogOut, Settings as SettingsIcon, CloudCheck } from 'lucide-react';
+import { LayoutDashboard, Wallet, Package, ShoppingCart, BarChart3, Menu, X, Cloud, LogOut, Settings as SettingsIcon, CloudCheck, PackagePlus } from 'lucide-react';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -60,9 +61,60 @@ const App: React.FC = () => {
     const pB = [...state.batches].filter(b => b.productName === s.productName && b.currentQty > 0).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     if (pB.reduce((sum, b) => sum + b.currentQty, 0) < s.qty) return alert("Stok kurang!");
     for (const b of pB) { if (rem <= 0) break; const take = Math.min(b.currentQty, rem); rem -= take; cogs += take * b.buyPrice; usg.push({ batchId: b.id, qtyUsed: take, costPerUnit: b.buyPrice }); await supabase.from('batches').update({ current_qty: b.currentQty - take }).eq('id', b.id); }
-    const { data: sD } = await supabase.from('sales').insert([{ date: s.date, product_name: s.productName, qty: s.qty, sell_price: s.sellPrice, total_revenue: s.qty * s.sellPrice, total_cogs: cogs, batch_usages: usg }]).select();
+    const { data: sD } = await supabase.from('sales').insert([{ date: s.date, product_name: s.product_name, qty: s.qty, sell_price: s.sellPrice, total_revenue: s.qty * s.sellPrice, total_cogs: cogs, batch_usages: usg }]).select();
     if (sD) await supabase.from('transactions').insert([{ date: s.date, amount: s.qty * s.sellPrice, description: `Jual: ${s.productName}`, category: TransactionCategory.PENJUALAN, type: TransactionType.IN, related_sale_id: sD[0].id }]);
     fetchData();
+  };
+
+  // FUNGSI PRODUKSI BARU
+  const addProduction = async (p: any) => {
+    setIsLoading(true);
+    try {
+      // 1. Potong Stok Bahan Baku
+      for (const ing of p.ingredients) {
+        const { data: b } = await supabase.from('batches').select('current_qty').eq('id', ing.batchId).single();
+        if (b) await supabase.from('batches').update({ current_qty: b.current_qty - ing.qty }).eq('id', ing.batchId);
+      }
+      // 2. Tambah Stok Barang Jadi (Batch Baru)
+      await supabase.from('batches').insert([{ 
+        date: new Date().toISOString().split('T')[0], 
+        product_name: p.productName, 
+        initial_qty: p.qty, 
+        current_qty: p.qty, 
+        buy_price: p.hpp, 
+        total_cost: p.hpp * p.qty, 
+        stock_type: 'HASIL_PRODUKSI' 
+      }]);
+      // 3. Catat Biaya Operasional di Buku Kas
+      if (p.totalOpCost > 0) {
+        await supabase.from('transactions').insert([{ 
+          date: new Date().toISOString().split('T')[0], 
+          amount: p.totalOpCost, 
+          description: `Biaya Produksi: ${p.productName}`, 
+          category: TransactionCategory.OPERASIONAL, 
+          type: TransactionType.OUT 
+        }]);
+      }
+      // 4. Simpan Riwayat Produksi ke tabel productions
+      await supabase.from('productions').insert([{ 
+        result_product_name: p.productName, 
+        result_qty: p.qty, 
+        total_ingredient_cost: (p.hpp * p.qty) - p.totalOpCost, 
+        total_op_cost: p.totalOpCost, 
+        hpp_per_unit: p.hpp, 
+        op_costs_detail: p.opCosts, 
+        ingredients_detail: p.ingredients, 
+        user_id: session?.user.id 
+      }]);
+      
+      await fetchData();
+      setActiveTab('inventory'); // Pindah ke inventory buat liat hasilnya
+    } catch (e) { 
+      console.error(e); 
+      alert("Gagal memproses produksi!"); 
+    } finally { 
+      setIsLoading(false); 
+    }
   };
 
   if (isLoading) return <div className="min-h-screen flex items-center justify-center font-bold">Menghubungkan ke Cloud...</div>;
@@ -72,6 +124,7 @@ const App: React.FC = () => {
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'cash', label: 'Buku Kas', icon: Wallet },
     { id: 'inventory', label: 'Stok Barang', icon: Package },
+    { id: 'production', label: 'Produksi', icon: PackagePlus }, // Tab Baru
     { id: 'sales', label: 'Penjualan', icon: ShoppingCart },
     { id: 'reports', label: 'Laporan', icon: BarChart3 },
     { id: 'settings', label: 'Pengaturan', icon: SettingsIcon },
@@ -110,6 +163,12 @@ const App: React.FC = () => {
               onDeleteBatch={(id) => window.confirm("Hapus data stok ini?") && supabase.from('batches').delete().eq('id', id).then(() => fetchData())} 
               onUseProductionStock={() => {}} 
               onDeleteProductionUsage={() => {}} 
+            />
+          )}
+          {activeTab === 'production' && (
+            <Production 
+              batches={state.batches} 
+              onAddProduction={addProduction} 
             />
           )}
           {activeTab === 'sales' && (
