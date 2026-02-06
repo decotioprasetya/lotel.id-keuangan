@@ -138,29 +138,22 @@ const App: React.FC = () => {
     setIsLoading(true);
     const today = new Date().toISOString().split('T')[0];
     try {
-      // 1. Potong Stok Bahan Baku & Catat Riwayat Pemakaian
       for (const ing of p.ingredients) {
         const { data: b } = await supabase.from('batches').select('current_qty, buy_price, product_name').eq('id', ing.batchId).single();
-        
         if (b) {
           await supabase.from('batches').update({ current_qty: b.current_qty - ing.qty }).eq('id', ing.batchId);
-          
-          // CATAT RIWAYAT (Input data ke kolom sesuai screenshot lo)
-          const { error: usageError } = await supabase.from('production_usages').insert([{
+          await supabase.from('production_usages').insert([{
             date: today,
             product_name: b.product_name || ing.productName || "Bahan Baku", 
             qty: Number(ing.qty),
             total_cost: Number(b.buy_price) * Number(ing.qty),
             batch_id: ing.batchId,
             user_id: session?.user.id,
-            batch_usages: [] // Fix untuk kolom jsonb agar tidak null
+            batch_usages: [] 
           }]);
-          
-          if (usageError) throw new Error(`Gagal catat riwayat bahan: ${usageError.message}`);
         }
       }
       
-      // 2. Tambah Stok Barang Jadi
       const { error: batchError } = await supabase.from('batches').insert([{ 
         date: today, 
         product_name: p.productName, 
@@ -172,7 +165,6 @@ const App: React.FC = () => {
       }]);
       if (batchError) throw batchError;
 
-      // 3. Catat Biaya Operasional
       if (p.totalOpCost > 0) {
         await supabase.from('transactions').insert([{ 
           date: today, 
@@ -183,7 +175,6 @@ const App: React.FC = () => {
         }]);
       }
 
-      // 4. Log Produksi
       const { error: prodError } = await supabase.from('productions').insert([{ 
         result_product_name: p.productName, 
         result_qty: p.qty, 
@@ -215,6 +206,40 @@ const App: React.FC = () => {
     } catch (e) {
       console.error(e);
     }
+  };
+
+  // --- LOGIKA HAPUS TRANSAKSI KAS (SINKRON KE STOK) ---
+  const handleDeleteTransaction = async (id: string) => {
+    if (!window.confirm("Hapus transaksi ini? Jika ini transaksi beli stok, stok di gudang juga akan terhapus!")) return;
+    
+    const { data: trans } = await supabase.from('transactions').select('related_stock_batch_id').eq('id', id).single();
+    
+    if (trans?.related_stock_batch_id) {
+      await supabase.from('batches').delete().eq('id', trans.related_stock_batch_id);
+    }
+    
+    await supabase.from('transactions').delete().eq('id', id);
+    fetchData();
+  };
+
+  // --- LOGIKA HAPUS PENJUALAN (RESTOCK KE GUDANG) ---
+  const handleDeleteSale = async (id: string) => {
+    if (!window.confirm("Hapus penjualan ini? Stok akan dikembalikan ke gudang dan catatan kas dihapus.")) return;
+
+    const { data: sale } = await supabase.from('sales').select('batch_usages').eq('id', id).single();
+
+    if (sale && sale.batch_usages) {
+      for (const usage of sale.batch_usages) {
+        const { data: bData } = await supabase.from('batches').select('current_qty').eq('id', usage.batchId).single();
+        if (bData) {
+          await supabase.from('batches').update({ current_qty: bData.current_qty + usage.qtyUsed }).eq('id', usage.batchId);
+        }
+      }
+    }
+
+    await supabase.from('transactions').delete().eq('related_sale_id', id);
+    await supabase.from('sales').delete().eq('id', id);
+    fetchData();
   };
 
   if (isLoading) return <div className="min-h-screen flex items-center justify-center font-black italic text-slate-400 animate-pulse">MENGHUBUNGKAN KE CLOUD...</div>;
@@ -254,7 +279,7 @@ const App: React.FC = () => {
               transactions={state.transactions} 
               onAdd={(t:any) => supabase.from('transactions').insert([t]).then(() => fetchData())} 
               onAddBatch={addBatch} 
-              onDelete={(id) => window.confirm("Hapus transaksi ini?") && supabase.from('transactions').delete().eq('id', id).then(() => fetchData())} 
+              onDelete={handleDeleteTransaction} 
             />
           )}
           {activeTab === 'inventory' && (
@@ -278,7 +303,7 @@ const App: React.FC = () => {
               sales={state.sales} 
               batches={state.batches} 
               onAddSale={addSale} 
-              onDeleteSale={(id) => window.confirm("Hapus transaksi penjualan?") && supabase.from('sales').delete().eq('id', id).then(() => fetchData())} 
+              onDeleteSale={handleDeleteSale} 
             />
           )}
           {activeTab === 'reports' && <Reports state={state} businessName={businessName} />}
