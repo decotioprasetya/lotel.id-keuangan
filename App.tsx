@@ -19,7 +19,6 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [businessName, setBusinessName] = useState('UMKM PRO');
 
-  // MAPPING: Snake_case (Database) -> camelCase (App)
   const mapBatch = (b: any): StockBatch => ({ id: b.id, date: b.date, productName: b.product_name, initialQty: b.initial_qty, currentQty: b.current_qty, buyPrice: Number(b.buy_price), totalCost: Number(b.total_cost), stockType: b.stock_type });
   const mapTrans = (t: any): Transaction => ({ id: t.id, date: t.date, amount: Number(t.amount), description: t.description, category: t.category, type: t.type, relatedSaleId: t.related_sale_id, relatedStockBatchId: t.related_stock_batch_id });
   const mapSale = (s: any): Sale => ({ id: s.id, date: s.date, productName: s.product_name, qty: s.qty, sellPrice: Number(s.sell_price), totalRevenue: Number(s.total_revenue), totalCOGS: Number(s.total_cogs), batchUsages: s.batch_usages });
@@ -42,19 +41,10 @@ const App: React.FC = () => {
         batches: (b.data || []).map(mapBatch),
         sales: (s.data || []).map(mapSale),
         productionUsages: (p.data || []).map((u: any) => ({ 
-          id: u.id,
-          date: u.date,
-          productName: u.product_name, 
-          qty: u.qty,
-          totalCost: Number(u.total_cost), 
-          batchId: u.batch_id
+          id: u.id, date: u.date, productName: u.product_name, qty: u.qty, totalCost: Number(u.total_cost), batchId: u.batch_id
         }))
       });
-    } catch (e) { 
-      console.error("Error fetching data:", e); 
-    } finally { 
-      setIsLoading(false); 
-    }
+    } catch (e) { console.error(e); } finally { setIsLoading(false); }
   };
 
   useEffect(() => {
@@ -73,63 +63,37 @@ const App: React.FC = () => {
   const addBatch = async (b: any) => {
     const cost = b.initialQty * b.buyPrice;
     const { data: bD } = await supabase.from('batches').insert([{ 
-      date: b.date, 
-      product_name: b.productName, 
-      initial_qty: b.initialQty, 
-      current_qty: b.initialQty, 
-      buy_price: b.buyPrice, 
-      total_cost: cost, 
-      stock_type: b.stockType 
+      date: b.date, product_name: b.productName, initial_qty: b.initialQty, current_qty: b.initialQty, 
+      buy_price: b.buyPrice, total_cost: cost, stock_type: b.stockType 
     }]).select();
     
     if (bD) await supabase.from('transactions').insert([{ 
-      date: b.date, 
-      amount: cost, 
-      description: `Beli: ${b.productName}`, 
-      category: TransactionCategory.BELI_STOK, 
-      type: TransactionType.OUT, 
-      related_stock_batch_id: bD[0].id 
+      date: b.date, amount: cost, description: `Beli: ${b.productName}`, 
+      category: TransactionCategory.BELI_STOK, type: TransactionType.OUT, related_stock_batch_id: bD[0].id 
     }]);
     fetchData();
   };
 
   const addSale = async (s: any) => {
-    let rem = s.qty; 
-    let cogs = 0; 
-    const usg: any[] = [];
-    
-    const pB = [...state.batches]
-      .filter(b => b.productName === s.productName && b.currentQty > 0 && b.stockType === StockType.FOR_SALE)
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    
+    let rem = s.qty; let cogs = 0; const usg: any[] = [];
+    const pB = [...state.batches].filter(b => b.productName === s.productName && b.currentQty > 0 && b.stockType === StockType.FOR_SALE).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     if (pB.reduce((sum, b) => sum + b.currentQty, 0) < s.qty) return alert("Stok kurang!");
 
     for (const b of pB) { 
       if (rem <= 0) break; 
-      const take = Math.min(b.currentQty, rem); 
-      rem -= take; 
-      cogs += take * b.buyPrice; 
+      const take = Math.min(b.currentQty, rem); rem -= take; cogs += take * b.buyPrice; 
       usg.push({ batchId: b.id, qtyUsed: take, costPerUnit: b.buyPrice }); 
       await supabase.from('batches').update({ current_qty: b.currentQty - take }).eq('id', b.id); 
     }
 
     const { data: sD } = await supabase.from('sales').insert([{ 
-      date: s.date, 
-      product_name: s.productName, 
-      qty: s.qty, 
-      sell_price: s.sellPrice, 
-      total_revenue: s.qty * s.sellPrice, 
-      total_cogs: cogs, 
-      batch_usages: usg 
+      date: s.date, product_name: s.productName, qty: s.qty, sell_price: s.sellPrice, 
+      total_revenue: s.qty * s.sellPrice, total_cogs: cogs, batch_usages: usg 
     }]).select();
 
     if (sD) await supabase.from('transactions').insert([{ 
-      date: s.date, 
-      amount: s.qty * s.sellPrice, 
-      description: `Jual: ${s.productName}`, 
-      category: TransactionCategory.PENJUALAN, 
-      type: TransactionType.IN, 
-      related_sale_id: sD[0].id 
+      date: s.date, amount: s.qty * s.sellPrice, description: `Jual: ${s.productName}`, 
+      category: TransactionCategory.PENJUALAN, type: TransactionType.IN, related_sale_id: sD[0].id 
     }]);
     fetchData();
   };
@@ -138,108 +102,74 @@ const App: React.FC = () => {
     setIsLoading(true);
     const today = new Date().toISOString().split('T')[0];
     try {
+      let totalIngredientCost = 0;
       for (const ing of p.ingredients) {
         const { data: b } = await supabase.from('batches').select('current_qty, buy_price, product_name').eq('id', ing.batchId).single();
         if (b) {
+          const cost = Number(b.buy_price) * Number(ing.qty);
+          totalIngredientCost += cost;
           await supabase.from('batches').update({ current_qty: b.current_qty - ing.qty }).eq('id', ing.batchId);
           await supabase.from('production_usages').insert([{
-            date: today,
-            product_name: b.product_name || ing.productName || "Bahan Baku", 
-            qty: Number(ing.qty),
-            total_cost: Number(b.buy_price) * Number(ing.qty),
-            batch_id: ing.batchId,
-            user_id: session?.user.id,
-            batch_usages: [] 
+            date: today, product_name: b.product_name, qty: Number(ing.qty), total_cost: cost, batch_id: ing.batchId, user_id: session?.user.id, batch_usages: [] 
           }]);
         }
       }
       
-      const { error: batchError } = await supabase.from('batches').insert([{ 
-        date: today, 
-        product_name: p.productName, 
-        initial_qty: p.qty, 
-        current_qty: p.qty, 
-        buy_price: p.hpp, 
-        total_cost: p.hpp * p.qty, 
-        stock_type: StockType.FOR_SALE 
+      await supabase.from('batches').insert([{ 
+        date: today, product_name: p.productName, initial_qty: p.qty, current_qty: p.qty, 
+        buy_price: p.hpp, total_cost: p.hpp * p.qty, stock_type: StockType.FOR_SALE 
       }]);
-      if (batchError) throw batchError;
 
-      if (p.totalOpCost > 0) {
+      if (totalIngredientCost > 0) {
         await supabase.from('transactions').insert([{ 
-          date: today, 
-          amount: p.totalOpCost, 
-          description: `Biaya Produksi: ${p.productName}`, 
-          category: TransactionCategory.BIAYA, 
-          type: TransactionType.OUT 
+          date: today, amount: totalIngredientCost, description: `Modal Bahan Baku: ${p.productName}`, category: TransactionCategory.BIAYA, type: TransactionType.OUT 
+        }]);
+      }
+      if (p.totalOpCost > 0) {
+        const opDetailNames = p.opCosts.map((o: any) => o.name).join(', ');
+        await supabase.from('transactions').insert([{ 
+          date: today, amount: p.totalOpCost, description: `Biaya Op (${opDetailNames}): ${p.productName}`, category: TransactionCategory.BIAYA, type: TransactionType.OUT 
         }]);
       }
 
-      const { error: prodError } = await supabase.from('productions').insert([{ 
-        result_product_name: p.productName, 
-        result_qty: p.qty, 
-        total_ingredient_cost: (p.hpp * p.qty) - p.totalOpCost, 
-        total_op_cost: p.totalOpCost, 
-        hpp_per_unit: p.hpp, 
-        op_costs_detail: p.opCosts, 
-        ingredients_detail: p.ingredients, 
-        user_id: session?.user.id 
+      await supabase.from('productions').insert([{ 
+        result_product_name: p.productName, result_qty: p.qty, total_ingredient_cost: totalIngredientCost, 
+        total_op_cost: p.totalOpCost, hpp_per_unit: p.hpp, op_costs_detail: p.opCosts, ingredients_detail: p.ingredients, user_id: session?.user.id 
       }]);
-      if (prodError) throw prodError;
       
       await fetchData();
       setActiveTab('inventory'); 
-      alert(`Produksi ${p.productName} Berhasil!`);
-    } catch (e: any) { 
-      console.error(e); 
-      alert("Error Simpan: " + e.message); 
-    } finally { 
-      setIsLoading(false); 
-    }
+      alert(`Produksi ${p.productName} Berhasil! Kas terpotong.`);
+    } catch (e: any) { alert("Error: " + e.message); } finally { setIsLoading(false); }
   };
 
-  const deleteProductionUsage = async (id: string) => {
-    if (!window.confirm("Hapus catatan pemakaian ini?")) return;
-    try {
-      await supabase.from('production_usages').delete().eq('id', id);
-      fetchData();
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  // --- LOGIKA HAPUS TRANSAKSI KAS (SINKRON KE STOK) ---
   const handleDeleteTransaction = async (id: string) => {
-    if (!window.confirm("Hapus transaksi ini? Jika ini transaksi beli stok, stok di gudang juga akan terhapus!")) return;
-    
+    if (!window.confirm("Hapus transaksi? Jika ini beli stok, stok gudang ikut terhapus!")) return;
     const { data: trans } = await supabase.from('transactions').select('related_stock_batch_id').eq('id', id).single();
-    
-    if (trans?.related_stock_batch_id) {
-      await supabase.from('batches').delete().eq('id', trans.related_stock_batch_id);
-    }
-    
+    if (trans?.related_stock_batch_id) await supabase.from('batches').delete().eq('id', trans.related_stock_batch_id);
     await supabase.from('transactions').delete().eq('id', id);
     fetchData();
   };
 
-  // --- LOGIKA HAPUS PENJUALAN (RESTOCK KE GUDANG) ---
   const handleDeleteSale = async (id: string) => {
-    if (!window.confirm("Hapus penjualan ini? Stok akan dikembalikan ke gudang dan catatan kas dihapus.")) return;
-
+    if (!window.confirm("Hapus penjualan? Stok akan dibalikkan ke gudang.")) return;
     const { data: sale } = await supabase.from('sales').select('batch_usages').eq('id', id).single();
-
-    if (sale && sale.batch_usages) {
+    if (sale?.batch_usages) {
       for (const usage of sale.batch_usages) {
-        const { data: bData } = await supabase.from('batches').select('current_qty').eq('id', usage.batchId).single();
-        if (bData) {
-          await supabase.from('batches').update({ current_qty: bData.current_qty + usage.qtyUsed }).eq('id', usage.batchId);
-        }
+        const { data: b } = await supabase.from('batches').select('current_qty').eq('id', usage.batchId).single();
+        if (b) await supabase.from('batches').update({ current_qty: b.current_qty + usage.qtyUsed }).eq('id', usage.batchId);
       }
     }
-
     await supabase.from('transactions').delete().eq('related_sale_id', id);
     await supabase.from('sales').delete().eq('id', id);
     fetchData();
+  };
+
+  const deleteProductionUsage = async (id: string) => {
+    if (window.confirm("Hapus catatan pemakaian?")) {
+      await supabase.from('production_usages').delete().eq('id', id);
+      fetchData();
+    }
   };
 
   if (isLoading) return <div className="min-h-screen flex items-center justify-center font-black italic text-slate-400 animate-pulse">MENGHUBUNGKAN KE CLOUD...</div>;
@@ -274,46 +204,15 @@ const App: React.FC = () => {
       <main className="flex-1 p-4 md:p-8 overflow-auto h-screen">
         <div className="max-w-7xl mx-auto">
           {activeTab === 'dashboard' && <Dashboard state={state} />}
-          {activeTab === 'cash' && (
-            <CashBook 
-              transactions={state.transactions} 
-              onAdd={(t:any) => supabase.from('transactions').insert([t]).then(() => fetchData())} 
-              onAddBatch={addBatch} 
-              onDelete={handleDeleteTransaction} 
-            />
-          )}
-          {activeTab === 'inventory' && (
-            <Inventory 
-              batches={state.batches} 
-              productionUsages={state.productionUsages} 
-              onAddBatch={addBatch} 
-              onDeleteBatch={(id) => window.confirm("Hapus data stok ini?") && supabase.from('batches').delete().eq('id', id).then(() => fetchData())} 
-              onUseProductionStock={() => {}} 
-              onDeleteProductionUsage={deleteProductionUsage} 
-            />
-          )}
-          {activeTab === 'production' && (
-            <Production 
-              batches={state.batches} 
-              onAddProduction={addProduction} 
-            />
-          )}
-          {activeTab === 'sales' && (
-            <Sales 
-              sales={state.sales} 
-              batches={state.batches} 
-              onAddSale={addSale} 
-              onDeleteSale={handleDeleteSale} 
-            />
-          )}
+          {activeTab === 'cash' && <CashBook transactions={state.transactions} onAdd={(t:any) => supabase.from('transactions').insert([t]).then(() => fetchData())} onAddBatch={addBatch} onDelete={handleDeleteTransaction} />}
+          {activeTab === 'inventory' && <Inventory batches={state.batches} productionUsages={state.productionUsages} onAddBatch={addBatch} onDeleteBatch={(id) => window.confirm("Hapus data stok ini?") && supabase.from('batches').delete().eq('id', id).then(() => fetchData())} onUseProductionStock={() => {}} onDeleteProductionUsage={deleteProductionUsage} />}
+          {activeTab === 'production' && <Production batches={state.batches} onAddProduction={addProduction} />}
+          {activeTab === 'sales' && <Sales sales={state.sales} batches={state.batches} onAddSale={addSale} onDeleteSale={handleDeleteSale} />}
           {activeTab === 'reports' && <Reports state={state} businessName={businessName} />}
           {activeTab === 'settings' && <Settings userId={session.user.id} onNameUpdated={(n) => setBusinessName(n)} />}
         </div>
       </main>
-      
-      <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="md:hidden fixed bottom-4 right-4 p-4 bg-indigo-600 text-white rounded-full shadow-lg z-50">
-        <Menu size={24} />
-      </button>
+      <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="md:hidden fixed bottom-4 right-4 p-4 bg-indigo-600 text-white rounded-full shadow-lg z-50"><Menu size={24} /></button>
     </div>
   );
 };
