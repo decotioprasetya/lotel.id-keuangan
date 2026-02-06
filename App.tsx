@@ -19,7 +19,7 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [businessName, setBusinessName] = useState('UMKM PRO');
 
-  // Mappers
+  // Mappers untuk sinkronisasi tipe data database & aplikasi
   const mapBatch = (b: any): StockBatch => ({ id: b.id, date: b.date, productName: b.product_name, initialQty: b.initial_qty, currentQty: b.current_qty, buyPrice: Number(b.buy_price), totalCost: Number(b.total_cost), stockType: b.stock_type });
   const mapTrans = (t: any): Transaction => ({ id: t.id, date: t.date, amount: Number(t.amount), description: t.description, category: t.category, type: t.type, relatedSaleId: t.related_sale_id, relatedStockBatchId: t.related_stock_batch_id });
   const mapSale = (s: any): Sale => ({ id: s.id, date: s.date, productName: s.product_name, qty: s.qty, sell_price: s.sell_price, totalRevenue: Number(s.total_revenue), totalCOGS: Number(s.total_cogs), batchUsages: s.batch_usages });
@@ -94,27 +94,32 @@ const App: React.FC = () => {
     }
 
     const { data: sD } = await supabase.from('sales').insert([{ 
-      date: s.date, product_name: s.productName, qty: s.qty, sell_price: s.sellPrice, 
-      total_revenue: s.qty * s.sellPrice, total_cogs: cogs, batch_usages: usg 
+      date: s.date, product_name: s.productName, qty: s.qty, sell_price: s.sell_price, 
+      total_revenue: s.qty * s.sell_price, total_cogs: cogs, batch_usages: usg 
     }]).select();
 
     if (sD) await supabase.from('transactions').insert([{ 
-      date: s.date, amount: s.qty * s.sellPrice, description: `Jual: ${s.productName}`, 
+      date: s.date, amount: s.qty * s.sell_price, description: `Jual: ${s.productName}`, 
       category: TransactionCategory.PENJUALAN, type: TransactionType.IN, related_sale_id: sD[0].id 
     }]);
     fetchData();
   };
 
+  // LOGIKA PRODUKSI (Traceability & Detail Deskripsi Kas)
   const addProduction = async (p: any) => {
     setIsLoading(true);
     const today = new Date().toISOString().split('T')[0];
     try {
       let totalIngredientCost = 0;
+      let ingredientSummary: string[] = []; 
+
       for (const ing of p.ingredients) {
         const { data: b } = await supabase.from('batches').select('current_qty, buy_price, product_name').eq('id', ing.batchId).single();
         if (b) {
           const cost = Number(b.buy_price) * Number(ing.qty);
           totalIngredientCost += cost;
+          ingredientSummary.push(`${b.product_name} (${ing.qty})`);
+
           await supabase.from('batches').update({ current_qty: b.current_qty - ing.qty }).eq('id', ing.batchId);
           await supabase.from('production_usages').insert([{
             date: today, product_name: b.product_name, target_product: p.productName, 
@@ -128,13 +133,17 @@ const App: React.FC = () => {
         buy_price: p.hpp, total_cost: p.hpp * p.qty, stock_type: StockType.FOR_SALE 
       }]);
 
-      if (p.totalOpCost > 0) {
-        const opNames = p.opCosts.map((o: any) => o.name).join(', ');
-        await supabase.from('transactions').insert([{ 
-          date: today, amount: p.totalOpCost, description: `Biaya Produksi (${opNames}): ${p.productName}`, 
-          category: TransactionCategory.BIAYA, type: TransactionType.OUT 
-        }]);
-      }
+      // Gabungkan nama bahan untuk Keterangan di Riwayat Kas
+      const materialsUsed = ingredientSummary.join(', ');
+      const opNames = p.opCosts.map((o: any) => o.name).join(', ') || 'Operasional';
+
+      await supabase.from('transactions').insert([{ 
+        date: today, 
+        amount: p.totalOpCost + totalIngredientCost, 
+        description: `Produksi: ${p.productName} (${p.qty} unit). Bahan: ${materialsUsed}. Biaya: ${opNames}`, 
+        category: TransactionCategory.BIAYA, 
+        type: TransactionType.OUT 
+      }]);
 
       await supabase.from('productions').insert([{ 
         result_product_name: p.productName, result_qty: p.qty, total_ingredient_cost: totalIngredientCost, 
@@ -143,7 +152,7 @@ const App: React.FC = () => {
       
       await fetchData();
       setActiveTab('inventory'); 
-      alert(`Berhasil! ${p.productName} telah ditambahkan.`);
+      alert(`Berhasil Produksi ${p.productName}!`);
     } catch (e: any) { alert("Error: " + e.message); } finally { setIsLoading(false); }
   };
 
@@ -204,11 +213,11 @@ const App: React.FC = () => {
           {activeTab === 'cash' && <CashBook transactions={state.transactions} onAdd={(t:any) => supabase.from('transactions').insert([t]).then(() => fetchData())} onAddBatch={addBatch} onDelete={handleDeleteTransaction} />}
           {activeTab === 'inventory' && <Inventory batches={state.batches} productionUsages={state.productionUsages} onAddBatch={addBatch} onDeleteBatch={(id) => window.confirm("Hapus stok?") && supabase.from('batches').delete().eq('id', id).then(() => fetchData())} onUseProductionStock={() => {}} onDeleteProductionUsage={(id) => supabase.from('production_usages').delete().eq('id', id).then(() => fetchData())} />}
           
-          {/* BARIS DI BAWAH INI YANG KITA PERBAIKI: TAMBAHKAN productionUsages */}
+          {/* Kirim data ke komponen Production */}
           {activeTab === 'production' && (
             <Production 
               batches={state.batches} 
-              productionUsages={state.productionUsages} 
+              productionUsages={state.productionUsages || []} 
               onAddProduction={addProduction} 
             />
           )}
