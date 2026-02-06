@@ -1,8 +1,7 @@
-
 import React, { useState } from 'react';
 import { StockBatch, StockType, ProductionUsage } from '../types';
 import { formatCurrency, formatDate } from '../utils/format';
-import { Box, Trash2, History, Info, ArrowDownRight, Zap, X, FlaskConical } from 'lucide-react';
+import { Box, Trash2, History, ArrowDownRight, Zap, X, FlaskConical, Calculator } from 'lucide-react';
 
 interface Props {
   batches: StockBatch[];
@@ -63,7 +62,6 @@ const Inventory: React.FC<Props> = ({
     setUsageQty('');
   };
 
-  // --- PERBAIKAN FILTER DISINI ---
   const filteredBatches = filterType === 'ALL' 
     ? batches 
     : batches.filter(b => b.stockType === filterType);
@@ -75,7 +73,6 @@ const Inventory: React.FC<Props> = ({
   const prodValue = batches
     .filter(b => b.stockType === StockType.FOR_PRODUCTION)
     .reduce((sum, b) => sum + (b.currentQty * b.buyPrice), 0);
-  // -------------------------------
 
   const getNextBatchPerProduct = () => {
     const nextBatches: Record<string, string> = {};
@@ -100,7 +97,6 @@ const Inventory: React.FC<Props> = ({
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Input Form */}
         <div className="lg:col-span-1 space-y-4">
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
             <h3 className="text-lg font-semibold mb-4">Input Stok Masuk</h3>
@@ -146,7 +142,6 @@ const Inventory: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Batch Table */}
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-50/50">
@@ -167,6 +162,7 @@ const Inventory: React.FC<Props> = ({
                     <th className="px-6 py-4">Barang & Tgl</th>
                     <th className="px-6 py-4">Sisa Stok</th>
                     <th className="px-6 py-4 text-right">HPP / Unit</th>
+                    <th className="px-6 py-4 text-right text-indigo-600">Nilai Aset</th>
                     <th className="px-6 py-4 text-center">Aksi</th>
                   </tr>
                 </thead>
@@ -174,6 +170,7 @@ const Inventory: React.FC<Props> = ({
                   {filteredBatches.map((b) => {
                     const isNext = nextBatches[b.productName] === b.id;
                     const percentLeft = (b.currentQty / b.initialQty) * 100;
+                    const totalAssetValue = b.currentQty * b.buyPrice;
 
                     return (
                       <tr key={b.id} className={`${b.currentQty === 0 ? 'bg-slate-50 opacity-60' : 'hover:bg-slate-50'} transition group`}>
@@ -198,6 +195,9 @@ const Inventory: React.FC<Props> = ({
                           </div>
                         </td>
                         <td className="px-6 py-4 text-sm font-bold text-right text-slate-700">{formatCurrency(b.buyPrice)}</td>
+                        <td className="px-6 py-4 text-sm font-black text-right text-indigo-600 bg-indigo-50/30">
+                          {formatCurrency(totalAssetValue)}
+                        </td>
                         <td className="px-6 py-4 text-center">
                           <div className="flex items-center justify-center gap-1">
                             {b.stockType === StockType.FOR_PRODUCTION && b.currentQty > 0 && (
@@ -219,7 +219,6 @@ const Inventory: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* Tabel Riwayat Pemakaian */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="p-4 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
                <FlaskConical size={18} className="text-slate-400" />
@@ -259,7 +258,6 @@ const Inventory: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Usage Modal */}
       {usageTarget && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 animate-in zoom-in-95 duration-200">
