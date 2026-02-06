@@ -45,7 +45,7 @@ const App: React.FC = () => {
           id: u.id, 
           date: u.date, 
           productName: u.product_name, 
-          targetProduct: u.target_product, // Field baru untuk Traceability
+          targetProduct: u.target_product,
           qty: u.qty, 
           totalCost: Number(u.total_cost), 
           batchId: u.batch_id 
@@ -105,55 +105,37 @@ const App: React.FC = () => {
     fetchData();
   };
 
-  // --- LOGIKA PRODUKSI (TRACEABILITY MODE) ---
   const addProduction = async (p: any) => {
     setIsLoading(true);
     const today = new Date().toISOString().split('T')[0];
     try {
       let totalIngredientCost = 0;
-      
-      // 1. Loop Bahan Baku
       for (const ing of p.ingredients) {
         const { data: b } = await supabase.from('batches').select('current_qty, buy_price, product_name').eq('id', ing.batchId).single();
         if (b) {
           const cost = Number(b.buy_price) * Number(ing.qty);
           totalIngredientCost += cost;
-          
-          // Potong Stok Bahan Baku
           await supabase.from('batches').update({ current_qty: b.current_qty - ing.qty }).eq('id', ing.batchId);
-          
-          // CATAT DI LOG PEMAKAIAN (DENGAN NAMA TARGET PRODUK)
           await supabase.from('production_usages').insert([{
-            date: today, 
-            product_name: b.product_name, // Plastik
-            target_product: p.productName, // Baskom (Kunci Traceability)
-            qty: Number(ing.qty), 
-            total_cost: cost, 
-            batch_id: ing.batchId, 
-            user_id: session?.user.id 
+            date: today, product_name: b.product_name, target_product: p.productName, 
+            qty: Number(ing.qty), total_cost: cost, batch_id: ing.batchId, user_id: session?.user.id 
           }]);
         }
       }
       
-      // 2. Tambah Stok Barang Jadi
       await supabase.from('batches').insert([{ 
         date: today, product_name: p.productName, initial_qty: p.qty, current_qty: p.qty, 
         buy_price: p.hpp, total_cost: p.hpp * p.qty, stock_type: StockType.FOR_SALE 
       }]);
 
-      // 3. Catat Kas untuk Biaya Operasional (Jahit, Listrik, dll)
       if (p.totalOpCost > 0) {
         const opNames = p.opCosts.map((o: any) => o.name).join(', ');
         await supabase.from('transactions').insert([{ 
-          date: today, 
-          amount: p.totalOpCost, 
-          description: `Biaya Produksi (${opNames}): ${p.productName}`, 
-          category: TransactionCategory.BIAYA, 
-          type: TransactionType.OUT 
+          date: today, amount: p.totalOpCost, description: `Biaya Produksi (${opNames}): ${p.productName}`, 
+          category: TransactionCategory.BIAYA, type: TransactionType.OUT 
         }]);
       }
 
-      // 4. Log Master Produksi
       await supabase.from('productions').insert([{ 
         result_product_name: p.productName, result_qty: p.qty, total_ingredient_cost: totalIngredientCost, 
         total_op_cost: p.totalOpCost, hpp_per_unit: p.hpp, op_costs_detail: p.opCosts, ingredients_detail: p.ingredients, user_id: session?.user.id 
@@ -161,7 +143,7 @@ const App: React.FC = () => {
       
       await fetchData();
       setActiveTab('inventory'); 
-      alert(`Berhasil! ${p.productName} telah ditambahkan ke stok.`);
+      alert(`Berhasil! ${p.productName} telah ditambahkan.`);
     } catch (e: any) { alert("Error: " + e.message); } finally { setIsLoading(false); }
   };
 
@@ -174,7 +156,7 @@ const App: React.FC = () => {
   };
 
   const handleDeleteSale = async (id: string) => {
-    if (!window.confirm("Hapus penjualan? Stok akan dibalikkan.")) return;
+    if (!window.confirm("Hapus penjualan?")) return;
     const { data: sale } = await supabase.from('sales').select('batch_usages').eq('id', id).single();
     if (sale?.batch_usages) {
       for (const usage of sale.batch_usages) {
@@ -187,7 +169,7 @@ const App: React.FC = () => {
     fetchData();
   };
 
-  if (isLoading) return <div className="min-h-screen flex items-center justify-center font-black italic text-slate-400 animate-pulse">MEMUAT DATA...</div>;
+  if (isLoading) return <div className="min-h-screen flex items-center justify-center font-black italic text-slate-400">MEMUAT...</div>;
   if (!session) return <Login onLoginSuccess={() => {}} />;
 
   const tabs = [
@@ -221,7 +203,16 @@ const App: React.FC = () => {
           {activeTab === 'dashboard' && <Dashboard state={state} />}
           {activeTab === 'cash' && <CashBook transactions={state.transactions} onAdd={(t:any) => supabase.from('transactions').insert([t]).then(() => fetchData())} onAddBatch={addBatch} onDelete={handleDeleteTransaction} />}
           {activeTab === 'inventory' && <Inventory batches={state.batches} productionUsages={state.productionUsages} onAddBatch={addBatch} onDeleteBatch={(id) => window.confirm("Hapus stok?") && supabase.from('batches').delete().eq('id', id).then(() => fetchData())} onUseProductionStock={() => {}} onDeleteProductionUsage={(id) => supabase.from('production_usages').delete().eq('id', id).then(() => fetchData())} />}
-          {activeTab === 'production' && <Production batches={state.batches} onAddProduction={addProduction} />}
+          
+          {/* BARIS DI BAWAH INI YANG KITA PERBAIKI: TAMBAHKAN productionUsages */}
+          {activeTab === 'production' && (
+            <Production 
+              batches={state.batches} 
+              productionUsages={state.productionUsages} 
+              onAddProduction={addProduction} 
+            />
+          )}
+
           {activeTab === 'sales' && <Sales sales={state.sales} batches={state.batches} onAddSale={addSale} onDeleteSale={handleDeleteSale} />}
           {activeTab === 'reports' && <Reports state={state} businessName={businessName} />}
           {activeTab === 'settings' && <Settings userId={session.user.id} onNameUpdated={(n) => setBusinessName(n)} />}
