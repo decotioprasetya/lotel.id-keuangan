@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StockBatch, StockType } from '../types'; // Tambahin StockType di sini
+import { StockBatch, StockType } from '../types'; 
 import { Plus, Trash2, Save, PackagePlus, Calculator } from 'lucide-react';
 
 interface Props {
@@ -60,9 +60,9 @@ const Production: React.FC<Props> = ({ batches, onAddProduction }) => {
                   onChange={e => { const n = [...ings]; n[i].batchId = e.target.value; setIngs(n); }}
                 >
                   <option value="">Pilih Stok...</option>
-                  {/* FILTER: Cuma tampilin yang stoknya ada DAN tipenya Bahan Baku (RAW_MATERIAL) */}
+                  {/* UPDATE FILTER: Pakai FOR_PRODUCTION biar sinkron sama CashBook */}
                   {batches
-                    .filter(b => b.currentQty > 0 && b.stockType === StockType.RAW_MATERIAL)
+                    .filter(b => b.currentQty > 0 && b.stockType === StockType.FOR_PRODUCTION)
                     .map(b => (
                       <option key={b.id} value={b.id}>
                         {b.productName} ({b.currentQty})
