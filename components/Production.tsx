@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StockBatch } from '../types';
+import { StockBatch, StockType } from '../types'; // Tambahin StockType di sini
 import { Plus, Trash2, Save, PackagePlus, Calculator } from 'lucide-react';
 
 interface Props {
@@ -10,7 +10,7 @@ interface Props {
 const Production: React.FC<Props> = ({ batches, onAddProduction }) => {
   const [resName, setResName] = useState(''); 
   const [resQty, setResQty] = useState(1);
-  const [ops, setOps] = useState([{ name: '', amount: 0 }]); // Ganti 'label' jadi 'name'
+  const [ops, setOps] = useState([{ name: '', amount: 0 }]);
   const [ings, setIngs] = useState([{ batchId: '', qty: 0 }]);
 
   const calculateHPP = () => {
@@ -31,7 +31,6 @@ const Production: React.FC<Props> = ({ batches, onAddProduction }) => {
     onAddProduction({
       productName: resName,
       qty: resQty,
-      // Filter operasional yang ada namanya dan ada nominalnya
       opCosts: ops.filter(o => o.name.trim() !== '' && o.amount > 0),
       ingredients: ings,
       totalOpCost: ops.reduce((s, x) => s + x.amount, 0),
@@ -45,6 +44,7 @@ const Production: React.FC<Props> = ({ batches, onAddProduction }) => {
     <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="bg-white rounded-3xl shadow-xl p-6 border border-slate-100 grid md:grid-cols-2 gap-8">
         
+        {/* SISI KIRI: BAHAN & BIAYA */}
         <div className="space-y-6 border-b md:border-b-0 md:border-r border-slate-100 pb-6 md:pb-0 md:pr-8">
           <h3 className="font-black italic text-indigo-600 flex items-center gap-2 uppercase text-sm tracking-tighter">
             <PackagePlus size={18} /> Resep & Operasional
@@ -54,9 +54,21 @@ const Production: React.FC<Props> = ({ batches, onAddProduction }) => {
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Pilih Bahan Baku</label>
             {ings.map((item, i) => (
               <div key={i} className="flex gap-2 mb-2">
-                <select className="flex-1 bg-slate-50 border rounded-xl px-2 py-2 text-xs font-bold" value={item.batchId} onChange={e => { const n = [...ings]; n[i].batchId = e.target.value; setIngs(n); }}>
+                <select 
+                  className="flex-1 bg-slate-50 border rounded-xl px-2 py-2 text-xs font-bold" 
+                  value={item.batchId} 
+                  onChange={e => { const n = [...ings]; n[i].batchId = e.target.value; setIngs(n); }}
+                >
                   <option value="">Pilih Stok...</option>
-                  {batches.filter(b => b.currentQty > 0).map(b => <option key={b.id} value={b.id}>{b.productName} ({b.currentQty})</option>)}
+                  {/* FILTER: Cuma tampilin yang stoknya ada DAN tipenya Bahan Baku (RAW_MATERIAL) */}
+                  {batches
+                    .filter(b => b.currentQty > 0 && b.stockType === StockType.RAW_MATERIAL)
+                    .map(b => (
+                      <option key={b.id} value={b.id}>
+                        {b.productName} ({b.currentQty})
+                      </option>
+                    ))
+                  }
                 </select>
                 <input type="number" placeholder="Qty" className="w-16 bg-slate-50 border rounded-xl px-2 py-2 text-xs font-bold text-center" value={item.qty} onChange={e => { const n = [...ings]; n[i].qty = Number(e.target.value); setIngs(n); }} />
                 <button onClick={() => setIngs(ings.filter((_, idx) => idx !== i))} className="text-red-400 hover:bg-red-50 p-1 rounded-lg transition"><Trash2 size={16}/></button>
@@ -78,6 +90,7 @@ const Production: React.FC<Props> = ({ batches, onAddProduction }) => {
           </div>
         </div>
 
+        {/* SISI KANAN: HASIL JADI */}
         <div className="space-y-6 flex flex-col justify-between bg-slate-50/50 p-4 rounded-2xl border border-dashed border-slate-200">
           <div className="space-y-4">
             <h3 className="font-black italic text-emerald-600 flex items-center gap-2 uppercase text-sm tracking-tighter">
