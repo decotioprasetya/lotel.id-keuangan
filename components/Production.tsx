@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { StockBatch } from '../types';
 import { Plus, Trash2, Save, PackagePlus, Calculator } from 'lucide-react';
@@ -9,9 +8,9 @@ interface Props {
 }
 
 const Production: React.FC<Props> = ({ batches, onAddProduction }) => {
-  const [resName, setResName] = useState(''); // Nama produk yang akan dijual (Jersey, dll)
+  const [resName, setResName] = useState(''); 
   const [resQty, setResQty] = useState(1);
-  const [ops, setOps] = useState([{ label: '', amount: 0 }]);
+  const [ops, setOps] = useState([{ name: '', amount: 0 }]); // Ganti 'label' jadi 'name'
   const [ings, setIngs] = useState([{ batchId: '', qty: 0 }]);
 
   const calculateHPP = () => {
@@ -32,21 +31,20 @@ const Production: React.FC<Props> = ({ batches, onAddProduction }) => {
     onAddProduction({
       productName: resName,
       qty: resQty,
-      opCosts: ops.filter(o => o.label && o.amount > 0),
+      // Filter operasional yang ada namanya dan ada nominalnya
+      opCosts: ops.filter(o => o.name.trim() !== '' && o.amount > 0),
       ingredients: ings,
       totalOpCost: ops.reduce((s, x) => s + x.amount, 0),
       hpp: calculateHPP()
     });
 
-    // Reset form setelah sukses
-    setResName(''); setResQty(1); setOps([{ label: '', amount: 0 }]); setIngs([{ batchId: '', qty: 0 }]);
+    setResName(''); setResQty(1); setOps([{ name: '', amount: 0 }]); setIngs([{ batchId: '', qty: 0 }]);
   };
 
   return (
     <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="bg-white rounded-3xl shadow-xl p-6 border border-slate-100 grid md:grid-cols-2 gap-8">
         
-        {/* SISI KIRI: BAHAN & BIAYA */}
         <div className="space-y-6 border-b md:border-b-0 md:border-r border-slate-100 pb-6 md:pb-0 md:pr-8">
           <h3 className="font-black italic text-indigo-600 flex items-center gap-2 uppercase text-sm tracking-tighter">
             <PackagePlus size={18} /> Resep & Operasional
@@ -71,16 +69,15 @@ const Production: React.FC<Props> = ({ batches, onAddProduction }) => {
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">Biaya Tambahan (Lain-lain)</label>
             {ops.map((item, i) => (
               <div key={i} className="flex gap-2 mb-2">
-                <input placeholder="Contoh: Ongkos Jahit" className="flex-1 bg-slate-50 border rounded-xl px-2 py-2 text-xs font-bold" value={item.label} onChange={e => { const n = [...ops]; n[i].label = e.target.value; setOps(n); }} />
+                <input placeholder="Contoh: Ongkos Jahit" className="flex-1 bg-slate-50 border rounded-xl px-2 py-2 text-xs font-bold" value={item.name} onChange={e => { const n = [...ops]; n[i].name = e.target.value; setOps(n); }} />
                 <input type="number" placeholder="Rp" className="w-24 bg-slate-50 border rounded-xl px-2 py-2 text-xs font-bold" value={item.amount} onChange={e => { const n = [...ops]; n[i].amount = Number(e.target.value); setOps(n); }} />
                 <button onClick={() => setOps(ops.filter((_, idx) => idx !== i))} className="text-red-400 hover:bg-red-50 p-1 rounded-lg transition"><Trash2 size={16}/></button>
               </div>
             ))}
-            <button onClick={() => setOps([...ops, {label:'', amount:0}])} className="text-[10px] font-bold text-indigo-600">+ TAMBAH BIAYA</button>
+            <button onClick={() => setOps([...ops, {name:'', amount:0}])} className="text-[10px] font-bold text-indigo-600">+ TAMBAH BIAYA</button>
           </div>
         </div>
 
-        {/* SISI KANAN: HASIL JADI */}
         <div className="space-y-6 flex flex-col justify-between bg-slate-50/50 p-4 rounded-2xl border border-dashed border-slate-200">
           <div className="space-y-4">
             <h3 className="font-black italic text-emerald-600 flex items-center gap-2 uppercase text-sm tracking-tighter">
