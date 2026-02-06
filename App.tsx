@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { AppState, Transaction, TransactionType, TransactionCategory, StockBatch, Sale, SaleItemUsage, ProductionUsage } from './types';
+
+import React, { useState, useEffect } from 'react';
+import { AppState, Transaction, TransactionType, TransactionCategory, StockBatch, Sale, StockType } from './types';
 import Dashboard from './components/Dashboard';
 import CashBook from './components/CashBook';
 import Inventory from './components/Inventory';
@@ -9,7 +10,7 @@ import Login from './components/Login';
 import Settings from './components/Settings';
 import Production from './components/Production'; 
 import { supabase } from './utils/supabase';
-import { LayoutDashboard, Wallet, Package, ShoppingCart, BarChart3, Menu, X, Cloud, LogOut, Settings as SettingsIcon, CloudCheck, PackagePlus } from 'lucide-react';
+import { LayoutDashboard, Wallet, Package, ShoppingCart, BarChart3, Menu, Cloud, LogOut, Settings as SettingsIcon, PackagePlus } from 'lucide-react';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -21,62 +22,119 @@ const App: React.FC = () => {
 
   const mapBatch = (b: any): StockBatch => ({ id: b.id, date: b.date, productName: b.product_name, initialQty: b.initial_qty, currentQty: b.current_qty, buyPrice: Number(b.buy_price), totalCost: Number(b.total_cost), stockType: b.stock_type });
   const mapTrans = (t: any): Transaction => ({ id: t.id, date: t.date, amount: Number(t.amount), description: t.description, category: t.category, type: t.type, relatedSaleId: t.related_sale_id, relatedStockBatchId: t.related_stock_batch_id });
-  const mapSale = (s: any): Sale => ({ id: s.id, date: s.date, productName: s.product_name, qty: s.qty, sell_price: s.sell_price, total_revenue: s.total_revenue, total_cogs: s.total_cogs, batchUsages: s.batch_usages });
+  const mapSale = (s: any): Sale => ({ id: s.id, date: s.date, productName: s.product_name, qty: s.qty, sellPrice: Number(s.sell_price), totalRevenue: Number(s.total_revenue), totalCOGS: Number(s.total_cogs), batchUsages: s.batch_usages });
 
   const fetchData = async () => {
     setIsLoading(true);
     try {
       const { data: prof } = await supabase.from('profile').select('business_name').maybeSingle();
       if (prof) setBusinessName(prof.business_name);
+      
       const [t, b, s, p] = await Promise.all([
         supabase.from('transactions').select('*').order('date', { ascending: false }),
         supabase.from('batches').select('*').order('date', { ascending: true }),
         supabase.from('sales').select('*').order('date', { ascending: false }),
         supabase.from('production_usages').select('*').order('date', { ascending: false })
       ]);
+
       setState({
         transactions: (t.data || []).map(mapTrans),
         batches: (b.data || []).map(mapBatch),
         sales: (s.data || []).map(mapSale),
         productionUsages: (p.data || []).map((u: any) => ({ ...u, totalCost: Number(u.total_cost) }))
       });
-    } catch (e) { console.error(e); } finally { setIsLoading(false); }
+    } catch (e) { 
+      console.error(e); 
+    } finally { 
+      setIsLoading(false); 
+    }
   };
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => { setSession(session); if (session) fetchData(); else setIsLoading(false); });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => { setSession(session); if (session) fetchData(); });
+    supabase.auth.getSession().then(({ data: { session } }) => { 
+      setSession(session); 
+      if (session) fetchData(); 
+      else setIsLoading(false); 
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => { 
+      setSession(session); 
+      if (session) fetchData(); 
+    });
     return () => subscription.unsubscribe();
   }, []);
 
   const addBatch = async (b: any) => {
     const cost = b.initialQty * b.buyPrice;
-    const { data: bD } = await supabase.from('batches').insert([{ date: b.date, product_name: b.productName, initial_qty: b.initialQty, current_qty: b.initialQty, buy_price: b.buyPrice, total_cost: cost, stock_type: b.stockType }]).select();
-    if (bD) await supabase.from('transactions').insert([{ date: b.date, amount: cost, description: `Beli: ${b.productName}`, category: TransactionCategory.BELI_STOK, type: TransactionType.OUT, related_stock_batch_id: bD[0].id }]);
+    const { data: bD } = await supabase.from('batches').insert([{ 
+      date: b.date, 
+      product_name: b.productName, 
+      initial_qty: b.initialQty, 
+      current_qty: b.initialQty, 
+      buy_price: b.buyPrice, 
+      total_cost: cost, 
+      stock_type: b.stockType 
+    }]).select();
+    
+    if (bD) await supabase.from('transactions').insert([{ 
+      date: b.date, 
+      amount: cost, 
+      description: `Beli: ${b.productName}`, 
+      category: TransactionCategory.BELI_STOK, 
+      type: TransactionType.OUT, 
+      related_stock_batch_id: bD[0].id 
+    }]);
     fetchData();
   };
 
   const addSale = async (s: any) => {
-    let rem = s.qty; let cogs = 0; const usg: any[] = [];
-    const pB = [...state.batches].filter(b => b.productName === s.productName && b.currentQty > 0).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    let rem = s.qty; 
+    let cogs = 0; 
+    const usg: any[] = [];
+    
+    const pB = [...state.batches]
+      .filter(b => b.productName === s.productName && b.currentQty > 0 && b.stockType === StockType.FOR_SALE)
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    
     if (pB.reduce((sum, b) => sum + b.currentQty, 0) < s.qty) return alert("Stok kurang!");
-    for (const b of pB) { if (rem <= 0) break; const take = Math.min(b.currentQty, rem); rem -= take; cogs += take * b.buyPrice; usg.push({ batchId: b.id, qtyUsed: take, costPerUnit: b.buyPrice }); await supabase.from('batches').update({ current_qty: b.currentQty - take }).eq('id', b.id); }
-    const { data: sD } = await supabase.from('sales').insert([{ date: s.date, product_name: s.productName, qty: s.qty, sell_price: s.sellPrice, total_revenue: s.qty * s.sellPrice, total_cogs: cogs, batch_usages: usg }]).select();
-    if (sD) await supabase.from('transactions').insert([{ date: s.date, amount: s.qty * s.sellPrice, description: `Jual: ${s.productName}`, category: TransactionCategory.PENJUALAN, type: TransactionType.IN, related_sale_id: sD[0].id }]);
+
+    for (const b of pB) { 
+      if (rem <= 0) break; 
+      const take = Math.min(b.currentQty, rem); 
+      rem -= take; 
+      cogs += take * b.buyPrice; 
+      usg.push({ batchId: b.id, qtyUsed: take, costPerUnit: b.buyPrice }); 
+      await supabase.from('batches').update({ current_qty: b.currentQty - take }).eq('id', b.id); 
+    }
+
+    const { data: sD } = await supabase.from('sales').insert([{ 
+      date: s.date, 
+      product_name: s.productName, 
+      qty: s.qty, 
+      sell_price: s.sellPrice, 
+      total_revenue: s.qty * s.sellPrice, 
+      total_cogs: cogs, 
+      batch_usages: usg 
+    }]).select();
+
+    if (sD) await supabase.from('transactions').insert([{ 
+      date: s.date, 
+      amount: s.qty * s.sellPrice, 
+      description: `Jual: ${s.productName}`, 
+      category: TransactionCategory.PENJUALAN, 
+      type: TransactionType.IN, 
+      related_sale_id: sD[0].id 
+    }]);
     fetchData();
   };
 
   const addProduction = async (p: any) => {
     setIsLoading(true);
     try {
-      // 1. Potong Stok Bahan Baku
       for (const ing of p.ingredients) {
         const { data: b } = await supabase.from('batches').select('current_qty').eq('id', ing.batchId).single();
         if (b) await supabase.from('batches').update({ current_qty: b.current_qty - ing.qty }).eq('id', ing.batchId);
       }
       
-      // 2. Tambah Stok Barang Jadi (Jersey dll)
-      // Kita set jadi BELI_STOK supaya filter di Sales.tsx bisa ngebaca ini sebagai barang jualan
       await supabase.from('batches').insert([{ 
         date: new Date().toISOString().split('T')[0], 
         product_name: p.productName, 
@@ -84,10 +142,9 @@ const App: React.FC = () => {
         current_qty: p.qty, 
         buy_price: p.hpp, 
         total_cost: p.hpp * p.qty, 
-        stock_type: 'BELI_STOK' 
+        stock_type: 'FOR_SALE' 
       }]);
 
-      // 3. Catat Biaya Operasional (Ongkos Jahit/Listrik)
       if (p.totalOpCost > 0) {
         await supabase.from('transactions').insert([{ 
           date: new Date().toISOString().split('T')[0], 
@@ -98,7 +155,6 @@ const App: React.FC = () => {
         }]);
       }
 
-      // 4. Simpan Riwayat Produksi
       await supabase.from('productions').insert([{ 
         result_product_name: p.productName, 
         result_qty: p.qty, 
@@ -120,7 +176,7 @@ const App: React.FC = () => {
     }
   };
 
-  if (isLoading) return <div className="min-h-screen flex items-center justify-center font-bold">Menghubungkan ke Cloud...</div>;
+  if (isLoading) return <div className="min-h-screen flex items-center justify-center font-black italic text-slate-400 animate-pulse">MENGHUBUNGKAN KE CLOUD...</div>;
   if (!session) return <Login onLoginSuccess={() => {}} />;
 
   const tabs = [
@@ -134,20 +190,22 @@ const App: React.FC = () => {
   ];
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-slate-50">
+    <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 font-sans">
       <aside className={`fixed inset-y-0 left-0 z-40 w-64 bg-slate-900 transform transition-transform md:relative md:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="p-6 text-white font-black italic flex items-center gap-2"><Cloud className="text-indigo-500" /> {businessName}</div>
+        <div className="p-6 text-white font-black italic flex items-center gap-2 border-b border-slate-800">
+          <Cloud className="text-indigo-500" /> {businessName}
+        </div>
         <nav className="p-4 space-y-2">
           {tabs.map(tab => (
-            <button key={tab.id} onClick={() => { setActiveTab(tab.id); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm transition ${activeTab === tab.id ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-800'}`}>
-              <tab.icon size={20} /> {tab.label}
+            <button key={tab.id} onClick={() => { setActiveTab(tab.id); setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold uppercase tracking-widest transition ${activeTab === tab.id ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-800 hover:text-slate-300'}`}>
+              <tab.icon size={18} /> {tab.label}
             </button>
           ))}
         </nav>
-        <button onClick={() => supabase.auth.signOut()} className="absolute bottom-6 left-6 text-slate-500 hover:text-red-400 flex items-center gap-2 text-xs font-bold"><LogOut size={14} /> Keluar</button>
+        <button onClick={() => supabase.auth.signOut()} className="absolute bottom-6 left-6 text-slate-600 hover:text-red-400 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest transition"><LogOut size={14} /> Keluar Sistem</button>
       </aside>
 
-      <main className="flex-1 p-4 md:p-8 overflow-auto">
+      <main className="flex-1 p-4 md:p-8 overflow-auto h-screen">
         <div className="max-w-7xl mx-auto">
           {activeTab === 'dashboard' && <Dashboard state={state} />}
           {activeTab === 'cash' && (
@@ -155,7 +213,7 @@ const App: React.FC = () => {
               transactions={state.transactions} 
               onAdd={(t:any) => supabase.from('transactions').insert([t]).then(() => fetchData())} 
               onAddBatch={addBatch} 
-              onDelete={(id) => window.confirm("Hapus transaksi ini, Bre?") && supabase.from('transactions').delete().eq('id', id).then(() => fetchData())} 
+              onDelete={(id) => window.confirm("Hapus transaksi ini?") && supabase.from('transactions').delete().eq('id', id).then(() => fetchData())} 
             />
           )}
           {activeTab === 'inventory' && (
@@ -179,14 +237,17 @@ const App: React.FC = () => {
               sales={state.sales} 
               batches={state.batches} 
               onAddSale={addSale} 
-              onDeleteSale={(id) => window.confirm("Hapus penjualan? Stok otomatis kembali.") && supabase.from('sales').delete().eq('id', id).then(() => fetchData())} 
+              onDeleteSale={(id) => window.confirm("Hapus transaksi penjualan?") && supabase.from('sales').delete().eq('id', id).then(() => fetchData())} 
             />
           )}
           {activeTab === 'reports' && <Reports state={state} businessName={businessName} />}
           {activeTab === 'settings' && <Settings userId={session.user.id} onNameUpdated={(n) => setBusinessName(n)} />}
         </div>
       </main>
-      <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="md:hidden fixed bottom-4 right-4 p-4 bg-indigo-600 text-white rounded-full shadow-lg z-50"><Menu size={24} /></button>
+      
+      <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="md:hidden fixed bottom-4 right-4 p-4 bg-indigo-600 text-white rounded-full shadow-lg z-50">
+        <Menu size={24} />
+      </button>
     </div>
   );
 };
