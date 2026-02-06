@@ -16,9 +16,9 @@ const Sales: React.FC<Props> = ({ sales, batches, onAddSale, onDeleteSale }) => 
   const [sellPrice, setSellPrice] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // Logika Filter: Ambil semua yang tipenya FOR_SALE (Barang Kulakan & Hasil Produksi)
+  // LOGIKA FILTER: Sinkron dengan Enum "Dijual"
   const productsWithStock = batches.reduce((acc, b) => {
-    // Cek apakah barang ini siap dijual
+    // Memastikan hanya mengambil stok yang tersedia dan tipenya "Dijual"
     if (b.currentQty > 0 && b.stockType === StockType.FOR_SALE) {
       if (!acc[b.productName]) {
         acc[b.productName] = { 
@@ -29,7 +29,7 @@ const Sales: React.FC<Props> = ({ sales, batches, onAddSale, onDeleteSale }) => 
       }
       acc[b.productName].total += b.currentQty;
       
-      // FIFO: Cari harga modal batch tertua
+      // Logika FIFO: Mencari harga modal dari batch paling lama
       if (new Date(b.date) < new Date(acc[b.productName].oldestBatchDate)) {
         acc[b.productName].oldestBatchDate = b.date;
         acc[b.productName].oldestPrice = b.buyPrice;
@@ -38,15 +38,17 @@ const Sales: React.FC<Props> = ({ sales, batches, onAddSale, onDeleteSale }) => 
     return acc;
   }, {} as Record<string, { total: number, oldestBatchDate: string, oldestPrice: number }>);
 
-  const availableProducts = Object.keys(productsWithStock);
+  const availableProducts = Object.keys(productsWithStock).sort(); // Urutkan nama produk A-Z
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!productName || !qty || !sellPrice) return;
     
     const totalAvailable = productsWithStock[productName]?.total || 0;
+    const inputQty = parseInt(qty);
 
-    if (parseInt(qty) > totalAvailable) {
+    if (inputQty <= 0) return alert("Jumlah harus lebih dari 0");
+    if (inputQty > totalAvailable) {
       alert(`Stok tidak mencukupi! Tersedia: ${totalAvailable}`);
       return;
     }
@@ -54,10 +56,11 @@ const Sales: React.FC<Props> = ({ sales, batches, onAddSale, onDeleteSale }) => 
     onAddSale({
       date,
       productName, 
-      qty: parseInt(qty),
+      qty: inputQty,
       sellPrice: parseFloat(sellPrice)
     });
 
+    // Reset Form
     setProductName('');
     setQty('');
     setSellPrice('');
@@ -77,14 +80,14 @@ const Sales: React.FC<Props> = ({ sales, batches, onAddSale, onDeleteSale }) => 
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Tanggal</label>
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Tanggal Transaksi</label>
               <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full border-2 border-slate-50 bg-slate-50 rounded-xl p-3 font-bold focus:bg-white focus:border-emerald-500 outline-none transition" />
             </div>
 
             <div>
-              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Pilih Produk (Siap Jual)</label>
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Pilih Produk (Tersedia)</label>
               <select value={productName} onChange={e => setProductName(e.target.value)} className="w-full border-2 border-slate-50 bg-slate-50 rounded-xl p-3 font-bold focus:bg-white focus:border-emerald-500 outline-none transition appearance-none">
-                <option value="">-- Cari Produk --</option>
+                <option value="">-- Pilih Barang --</option>
                 {availableProducts.map(p => (
                   <option key={p} value={p}>{p} ({productsWithStock[p].total} unit)</option>
                 ))}
@@ -94,11 +97,11 @@ const Sales: React.FC<Props> = ({ sales, batches, onAddSale, onDeleteSale }) => 
             {productName && productsWithStock[productName] && (
               <div className="p-4 bg-emerald-50 rounded-2xl border-2 border-emerald-100/50 grid grid-cols-2 gap-4">
                 <div>
-                  <p className="text-[9px] font-black text-emerald-600 uppercase mb-1">HPP (FIFO)</p>
+                  <p className="text-[9px] font-black text-emerald-600 uppercase mb-1">Modal (FIFO)</p>
                   <p className="text-sm font-black text-emerald-900">{formatCurrency(productsWithStock[productName].oldestPrice)}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-[9px] font-black text-emerald-600 uppercase mb-1">Sisa Stok</p>
+                  <p className="text-[9px] font-black text-emerald-600 uppercase mb-1">Total Stok</p>
                   <p className="text-sm font-black text-emerald-900">{productsWithStock[productName].total} Unit</p>
                 </div>
               </div>
@@ -106,12 +109,12 @@ const Sales: React.FC<Props> = ({ sales, batches, onAddSale, onDeleteSale }) => 
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Jumlah</label>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Qty Jual</label>
                 <input type="number" value={qty} onChange={e => setQty(e.target.value)} placeholder="0" className="w-full border-2 border-slate-50 bg-slate-50 rounded-xl p-3 font-bold focus:bg-white focus:border-emerald-500 outline-none transition" />
               </div>
               <div>
-                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Harga Jual</label>
-                <input type="number" value={sellPrice} onChange={e => setSellPrice(e.target.value)} placeholder="0" className="w-full border-2 border-slate-50 bg-slate-50 rounded-xl p-3 font-bold focus:bg-white focus:border-emerald-500 outline-none transition" />
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Harga Jual / Unit</label>
+                <input type="number" value={sellPrice} onChange={e => setSellPrice(e.target.value)} placeholder="Rp" className="w-full border-2 border-slate-50 bg-slate-50 rounded-xl p-3 font-bold focus:bg-white focus:border-emerald-500 outline-none transition" />
               </div>
             </div>
 
@@ -143,7 +146,7 @@ const Sales: React.FC<Props> = ({ sales, batches, onAddSale, onDeleteSale }) => 
                   <th className="px-6 py-4">Produk</th>
                   <th className="px-6 py-4 text-center">Qty</th>
                   <th className="px-6 py-4 text-right">Total Jual</th>
-                  <th className="px-6 py-4 text-right text-rose-400">Total HPP</th>
+                  <th className="px-6 py-4 text-right text-rose-400">Total Modal (HPP)</th>
                   <th className="px-6 py-4 text-center">Aksi</th>
                 </tr>
               </thead>
