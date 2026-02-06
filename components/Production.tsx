@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { StockBatch, StockType } from '../types'; 
-import { Trash2, Save, PackagePlus, Calculator, History, ArrowRight } from 'lucide-react';
+import { Trash2, Save, PackagePlus, Calculator, History, ArrowRight, Box } from 'lucide-react';
 
 interface Props {
   batches: StockBatch[];
@@ -124,50 +124,69 @@ const Production: React.FC<Props> = ({ batches, onAddProduction }) => {
         </div>
       </div>
 
-      {/* --- BAGIAN BARU: LOG RIWAYAT KONVERSI --- */}
+      {/* --- LOG RIWAYAT KONVERSI (TRACEABILITY) --- */}
       <div className="bg-white rounded-3xl shadow-xl p-6 border border-slate-100">
-        <h3 className="font-black italic text-slate-800 flex items-center gap-2 uppercase text-sm tracking-tighter mb-4">
-          <History size={18} className="text-slate-400" /> Log Konversi Barang Terakhir
-        </h3>
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="font-black italic text-slate-800 flex items-center gap-2 uppercase text-sm tracking-tighter">
+            <History size={18} className="text-indigo-600" /> Jurnal Konversi Produksi
+          </h3>
+          <span className="text-[10px] bg-slate-100 text-slate-500 px-3 py-1 rounded-full font-bold uppercase tracking-widest">
+            Audit Trail
+          </span>
+        </div>
+        
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead>
               <tr className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-50">
-                <th className="pb-3 px-2">Tanggal</th>
-                <th className="pb-3 px-2">Bahan (Out)</th>
-                <th className="pb-3 px-2 text-center">Proses</th>
-                <th className="pb-3 px-2">Hasil Jadi (In)</th>
-                <th className="pb-3 px-2 text-right">Nilai Konversi</th>
+                <th className="pb-3 px-4">Tanggal</th>
+                <th className="pb-3 px-4">Aktivitas</th>
+                <th className="pb-3 px-4 text-center">Proses</th>
+                <th className="pb-3 px-4">Hasil Jadi (Inventory In)</th>
+                <th className="pb-3 px-4 text-right">Nilai Total</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
-              {/* Ambil stok yang statusnya FOR_SALE (hasil produksi) */}
               {batches
                 .filter(b => b.stockType === StockType.FOR_SALE)
-                .slice(-5).reverse() // Ambil 5 terakhir
+                .reverse()
+                .slice(0, 10) // Tampilkan 10 terakhir
                 .map((b, idx) => (
                   <tr key={idx} className="text-xs group hover:bg-slate-50 transition-colors">
-                    <td className="py-4 px-2 font-medium text-slate-400">{b.date}</td>
-                    <td className="py-4 px-2 italic text-slate-500">
-                      Cek Stok ID: {b.id.substring(0,5)}...
+                    <td className="py-4 px-4 font-bold text-slate-400">{b.date}</td>
+                    <td className="py-4 px-4 uppercase">
+                      <div className="flex items-center gap-2 text-red-500 font-black text-[10px]">
+                        <Box size={12} /> Bahan Keluar
+                      </div>
+                      <div className="text-[9px] text-slate-400 italic font-medium">Batch ID: {b.id.substring(0,8)}</div>
                     </td>
-                    <td className="py-4 px-2 text-center">
-                      <div className="flex items-center justify-center gap-1 text-indigo-500">
-                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse"></span>
-                        <ArrowRight size={14} />
+                    <td className="py-4 px-4 text-center">
+                      <div className="flex flex-col items-center justify-center gap-1">
+                        <span className="text-[9px] font-black text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-full uppercase">Konversi</span>
+                        <ArrowRight size={14} className="text-indigo-400" />
                       </div>
                     </td>
-                    <td className="py-4 px-2 font-black text-slate-800 uppercase tracking-tight">
-                      {b.productName} <span className="text-indigo-600">({b.initialQty} Pcs)</span>
+                    <td className="py-4 px-4">
+                      <div className="font-black text-slate-800 uppercase tracking-tight leading-tight">
+                        {b.productName}
+                      </div>
+                      <div className="text-[10px] font-bold text-emerald-600">
+                        + {b.initialQty} Unit Masuk Stok
+                      </div>
                     </td>
-                    <td className="py-4 px-2 text-right font-bold text-slate-900">
-                      Rp {(b.buyPrice * b.initialQty).toLocaleString()}
+                    <td className="py-4 px-4 text-right">
+                      <div className="font-black text-slate-900">
+                        Rp {b.totalCost.toLocaleString()}
+                      </div>
+                      <div className="text-[9px] text-slate-400 font-bold uppercase">Aset Berpindah</div>
                     </td>
                   </tr>
                 ))}
               {batches.filter(b => b.stockType === StockType.FOR_SALE).length === 0 && (
                 <tr>
-                   <td colSpan={5} className="py-10 text-center text-slate-400 italic">Belum ada riwayat produksi hari ini.</td>
+                   <td colSpan={5} className="py-16 text-center text-slate-400 italic text-sm font-medium">
+                     Belum ada aktivitas konversi bahan baku.
+                   </td>
                 </tr>
               )}
             </tbody>
