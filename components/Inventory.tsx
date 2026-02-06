@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { StockBatch, StockType, ProductionUsage } from '../types';
 import { formatCurrency, formatDate } from '../utils/format';
@@ -186,4 +187,112 @@ const Inventory: React.FC<Props> = ({
                         </td>
                         <td className="px-6 py-4">
                           <div className="text-sm font-bold text-slate-800">{b.productName}</div>
-                          <div className="text-[10px] text-slate-500">{format
+                          <div className="text-[10px] text-slate-500">{formatDate(b.date)}</div>
+                        </td>
+                        <td className="px-6 py-4 min-w-[120px]">
+                          <div className="flex justify-between items-center mb-1">
+                            <span className="text-xs font-bold text-slate-700">{b.currentQty} / {b.initialQty}</span>
+                          </div>
+                          <div className="w-full bg-slate-100 h-1 rounded-full overflow-hidden">
+                            <div className={`h-full ${percentLeft < 20 ? 'bg-red-500' : 'bg-indigo-600'}`} style={{ width: `${percentLeft}%` }} />
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-sm font-bold text-right text-slate-700">{formatCurrency(b.buyPrice)}</td>
+                        <td className="px-6 py-4 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            {b.stockType === StockType.FOR_PRODUCTION && b.currentQty > 0 && (
+                              <button onClick={() => setUsageTarget({name: b.productName, available: productionProducts[b.productName]})} className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition" title="Gunakan untuk Produksi Manual"><Zap size={16} /></button>
+                            )}
+                            {/* TOMBOL DELETE: Kita izinkan delete jika ini hasil produksi (biar gak ghaib) atau stok belum tersentuh */}
+                            <button 
+                              onClick={() => onDeleteBatch(b.id)} 
+                              className="p-2 rounded-lg transition text-slate-300 hover:text-red-600 hover:bg-red-50"
+                              title="Hapus Batch"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Tabel Riwayat Pemakaian - Sekarang terintegrasi dengan data produksi */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="p-4 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
+               <FlaskConical size={18} className="text-slate-400" />
+               <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Riwayat Penggunaan Bahan Baku</h3>
+            </div>
+            <div className="overflow-x-auto max-h-[300px]">
+              <table className="w-full text-left text-xs">
+                <thead className="sticky top-0 bg-slate-100 text-slate-500 font-bold">
+                  <tr>
+                    <th className="px-6 py-3">Tanggal</th>
+                    <th className="px-6 py-3">Bahan / Produk Jadi</th>
+                    <th className="px-6 py-3 text-center">Jumlah</th>
+                    <th className="px-6 py-3 text-right">Nilai</th>
+                    <th className="px-6 py-3 text-center">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {productionUsages.length === 0 ? (
+                    <tr><td colSpan={5} className="px-6 py-8 text-center text-slate-400 italic">Belum ada pemakaian bahan terekam</td></tr>
+                  ) : (
+                    [...productionUsages].reverse().map(u => (
+                      <tr key={u.id} className="hover:bg-slate-50">
+                        <td className="px-6 py-3 whitespace-nowrap">{formatDate(u.date || new Date().toISOString())}</td>
+                        <td className="px-6 py-3 font-bold text-slate-800">{u.productName || (u as any).result_product_name}</td>
+                        <td className="px-6 py-3 text-center">{(u as any).qty || (u as any).result_qty} unit</td>
+                        <td className="px-6 py-3 text-right font-bold text-red-600">{formatCurrency(u.totalCost || (u as any).hpp_per_unit)}</td>
+                        <td className="px-6 py-3 text-center">
+                          <button onClick={() => onDeleteProductionUsage(u.id)} className="text-slate-300 hover:text-red-600"><Trash2 size={14} /></button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Usage Modal */}
+      {usageTarget && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-bold text-slate-800">Gunakan Bahan Produksi</h3>
+              <button onClick={() => setUsageTarget(null)} className="p-2 hover:bg-slate-100 rounded-full"><X size={20} /></button>
+            </div>
+            <div className="space-y-4">
+              <div className="p-4 bg-indigo-50 rounded-xl border border-indigo-100">
+                <p className="text-xs text-indigo-600 font-bold uppercase">Material</p>
+                <p className="text-lg font-black text-indigo-900">{usageTarget.name}</p>
+                <p className="text-xs text-indigo-500 mt-1">Stok Gudang: <span className="font-bold">{usageTarget.available} unit</span></p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-600 mb-1">Tanggal Keluar</label>
+                <input type="date" value={usageDate} onChange={e => setUsageDate(e.target.value)} className="w-full border rounded-lg p-2 outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-600 mb-1">Jumlah yang Dikeluarkan</label>
+                <input type="number" value={usageQty} onChange={e => setUsageQty(e.target.value)} placeholder="0" className="w-full border rounded-lg p-3 text-lg font-bold outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+              <div className="pt-2">
+                <button onClick={handleUseSubmit} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition shadow-lg shadow-indigo-100 flex items-center justify-center gap-2"><Zap size={18} /> Konfirmasi Keluar</button>
+                <p className="text-[10px] text-slate-400 text-center mt-3 uppercase font-medium italic">Data ini akan dicatat sebagai biaya pemakaian material.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default Inventory;
